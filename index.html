@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PiCS</title>
+
+  <!-- iPad: lock window for scrolling -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+  <!-- jsPsych 8-->
+  <script src="https://unpkg.com/jspsych@8"></script>
+  <link  href="https://unpkg.com/jspsych@8/css/jspsych.css" rel="stylesheet">
+
+  <!-- Plugins -->
+  <script src="https://unpkg.com/@jspsych/plugin-preload@2"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-html-button-response@2"></script>
+  <script src="https://unpkg.com/@jspsych/plugin-survey-html-form@2"></script>
+
+  <!-- DataPipe (v0.6 targets jsPsych 8) -->
+  <script src="https://unpkg.com/@jspsych-contrib/plugin-pipe@0.6"></script>
+
+  <link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+  <!-- Experiment code. config must load first; the trial bank is fetched
+       from trials.csv at runtime. -->
+  <script src="js/config.js"></script>
+  <script src="js/experiment.js"></script>
+</body>
+</html>
