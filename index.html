@@ -242,10 +242,19 @@
     .go-btn.pop { animation: none; }
   }
 
-  .label-plate {
-    font-size: 40px;
-    font-weight: 650;
-    margin: 24px 0;
+  .sample-stage {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6vh;
+  }
+
+  .choice-row {
+    display: flex;
+    gap: 8vw;
+    justify-content: center;
   }
 
   .stim {
@@ -268,16 +277,19 @@
     word-break: break-all;
   }
 
-  .target-row .stim { width: 300px; height: 300px; }
-
   .choice-btn {
     background: var(--white);
     border: 3px solid var(--line);
     border-radius: 22px;
     padding: 18px;
-    margin: 0 20px;
+    transition: opacity 200ms ease, border-color 150ms ease;
   }
   .choice-btn:active { border-color: var(--go); }
+  .choice-btn.chosen { border-color: var(--go); }
+  .choice-btn.dimmed { opacity: 0.25; }
+  .choice-btn[disabled] { pointer-events: none; }
+
+  .target-slot .stim { width: 320px; height: 320px; }
 
   .sort-row { display: flex; gap: 28px; justify-content: center; }
 

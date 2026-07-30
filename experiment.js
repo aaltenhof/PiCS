@@ -2,8 +2,11 @@
 const DATAPIPE_ID   = null;              
 const TRIAL_FILE    = "trials.csv";
 const INTRO_VIDEO   = "intro_video.mp4";
-const STIM_DIR      = "selected/stimuli/";
-const AUDIO_DIR     = "audio/";
+const STIM_DIR      = "selected_stim/";
+const LABEL_AUDIO   = "audio/sample/labels/";
+const SUPPORT_AUDIO = "audio/sample/support/";
+const CUE_HERES     = SUPPORT_AUDIO + "heres_a_thing.wav";
+const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 
 const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
@@ -152,9 +155,34 @@ function buildRunList(bank) {
 }
 
 
-function stimImg(file, cls = "") {
-    return `<img class="stim ${cls}" src="${STIM_DIR}${file}" alt="${file}"
+function triadDir(t) {
+    const n = String(t.trial_id).replace(/\D/g, "") || "1";
+    return `${STIM_DIR}${t.stim_type}/triad${n}/`;
+}
+
+function stimSrc(t, file) { return triadDir(t) + file; }
+
+function labelSrc(label, file) { return `${LABEL_AUDIO}${label}/${file}`; }
+
+function stimImg(t, file, cls = "") {
+    return `<img class="stim ${cls}" src="${stimSrc(t, file)}" alt=""
               onerror="this.outerHTML='<div class=\\'stim stim-missing ${cls}\\'>${file}</div>'">`;
+}
+
+function playAudio(src) {
+    return new Promise(resolve => {
+        const a = new Audio(src);
+        a.addEventListener("ended", resolve, { once: true });
+        a.addEventListener("error", () => {
+            console.warn("PiCS: audio missing —", src);
+            resolve();
+        });
+        const p = a.play();
+        if (p && p.catch) p.catch(err => {
+            console.warn("PiCS: audio blocked —", src, err.name);
+            resolve();
+        });
+    });
 }
 
 function showFatal(err) {
@@ -259,55 +287,93 @@ const intro_video = {
 const intake = { timeline: [id_screen, intro_video] };
 
 
-//To-Do: Sample ans sorts
 function trialData(t, task) {
     return {
-        task: task,                                    // "sample" | "sort"
-        trial_id: t.trial_id,                          // which trial (from CSV)
-        run_order: t.run_order,                        // where it landed
+        task: task,
+        trial_id: t.trial_id,
+        run_order: t.run_order,
         con_trial_num: (t.run_order - 1) * 2 + (task === "sample" ? 1 : 2),
         trial_type: t.trial_type,
         is_practice: t.trial_type === "practice",
         block_ID: t.block_ID,
         stim_type: t.stim_type,
+        triad_dir: triadDir(t),
         a_stim: t.a_stim, b_stim: t.b_stim, x_stim: t.x_stim,
         matched: t.matched,
-        label: t.label,
         matched_label: t.matched_label,
         unmatched_label: t.unmatched_label,
+        label: t.label,
         b_side: t.b_side
     };
 }
 
 function createSampleTrial(t) {
-    const left  = t.b_side === "left" ? t.b_stim : t.x_stim;
-    const right = t.b_side === "left" ? t.x_stim : t.b_stim;
+    const leftIsB   = t.b_side === "left";
+    const leftStim  = leftIsB ? t.b_stim : t.x_stim;
+    const rightStim = leftIsB ? t.x_stim : t.b_stim;
 
     return {
         type: jsPsychHtmlButtonResponse,
         css_classes: ["child"],
+        choices: [],
         stimulus: `
-          <div class="target-row">${stimImg(t.a_stim, "target")}</div>
-          <div class="label-plate">${t.label}</div>`,
-        choices: [left, right],
-        button_html: choice => `<button class="choice-btn">${stimImg(choice)}</button>`,
+          <div class="sample-stage">
+            <div class="target-slot">${stimImg(t, t.a_stim, "target")}</div>
+            <div class="choice-row hidden" id="choice-row">
+              <button class="choice-btn" id="choice-left">${stimImg(t, leftStim)}</button>
+              <button class="choice-btn" id="choice-right">${stimImg(t, rightStim)}</button>
+            </div>
+          </div>`,
         data: trialData(t, "sample"),
-        on_finish: function (data) {
-            const chosen = data.response === 0 ? left : right;
-            data.sampled = chosen === t.b_stim ? "B" : "X";
-            data.sampled_stim = chosen;
+        on_load: async function () {
+            const row  = document.getElementById("choice-row");
+            const btnL = document.getElementById("choice-left");
+            const btnR = document.getElementById("choice-right");
+
+            await playAudio(CUE_HERES);
+            await playAudio(labelSrc(t.matched_label, t.a_audio));
+
+            row.classList.remove("hidden");
+            const t0 = performance.now();
+
+            const respond = async (isLeft, btn, other) => {
+                const rt = Math.round(performance.now() - t0);
+                btnL.disabled = true;
+                btnR.disabled = true;
+                other.classList.add("dimmed");
+                btn.classList.add("chosen");
+
+                const sampled     = isLeft === leftIsB ? "B" : "X";
+                const sampledStim = isLeft ? leftStim : rightStim;
+                const heardLabel  = t.matched ? t.matched_label : t.unmatched_label;
+                const heardFile   = t.matched ? t.matched_audio : t.unmatched_audio;
+
+                await playAudio(labelSrc(heardLabel, heardFile));
+                await playAudio(CUE_TO_SORT);
+
+                jsPsych.finishTrial({
+                    rt: rt,
+                    sampled: sampled,
+                    sampled_stim: sampledStim,
+                    sampled_side: isLeft ? "left" : "right",
+                    heard_label: heardLabel
+                });
+            };
+
+            btnL.addEventListener("click", () => respond(true,  btnL, btnR), { once: true });
+            btnR.addEventListener("click", () => respond(false, btnR, btnL), { once: true });
         }
     };
 }
 
+// To-do: sort
 function createSortTrial(t) {
     return {
         type: jsPsychHtmlButtonResponse,
         css_classes: ["child"],
         stimulus: `
-          <div class="label-plate">Which ones are the ${t.label}?</div>
           <div class="sort-row">
-            ${stimImg(t.a_stim)}${stimImg(t.b_stim)}${stimImg(t.x_stim)}
+            ${stimImg(t, t.a_stim)}${stimImg(t, t.b_stim)}${stimImg(t, t.x_stim)}
           </div>`,
         choices: ["Done"],
         button_html: choice => `<button class="go-btn go-btn-small">${choice}</button>`,
@@ -374,10 +440,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const preload = {
         type: jsPsychPreload,
         video: [INTRO_VIDEO],
-        // Add these later:
-        // images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => STIM_DIR + f)),
-        // audio:  runList.flatMap(t => [t.a_audio, t.label_audio, t.transition_audio]
-        //                              .map(f => AUDIO_DIR + f)),
+        images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
+        audio: [CUE_HERES, CUE_TO_SORT].concat(runList.flatMap(t => [
+            labelSrc(t.matched_label, t.a_audio),
+            labelSrc(t.matched_label, t.matched_audio),
+            labelSrc(t.unmatched_label, t.unmatched_audio)
+        ])),
         continue_after_error: true,
         show_detailed_errors: true
     };
