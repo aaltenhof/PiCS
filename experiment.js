@@ -1,9 +1,9 @@
 
 const DATAPIPE_ID   = null;              
 const TRIAL_FILE    = "trials.csv";
-const INTRO_VIDEO   = "media/intro_video.mp4";
-const STIM_DIR      = "media/stimuli/";
-const AUDIO_DIR     = "media/audio/";
+const INTRO_VIDEO   = "intro_video.mp4";
+const STIM_DIR      = "selected/stimuli/";
+const AUDIO_DIR     = "audio/";
 
 const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
@@ -16,7 +16,6 @@ var jsPsych = initJsPsych();
 
 var study_id = "PiCS";
 var participant_id = "";
-var redo_id = false;
 
 var today = new Date();
 var dd = String(today.getDate()).padStart(2, '0');
@@ -192,31 +191,20 @@ const id_screen = {
 
 const start_and_intro = {
     type: jsPsychHtmlButtonResponse,
-    css_classes: ["researcher"],
-    stimulus: function () {
-        return `
-          <div id="rsrch-panel">
-            <div class="rsrch-kicker">Confirm</div>
-            <div class="id-readout">${participant_id}</div>
-            <p class="rsrch-note">Tap start, then hand the iPad to the child.</p>
-            <div class="rsrch-actions">
-              <button id="redo-btn" class="rsrch-btn rsrch-btn-alt">Re-enter ID</button>
-              <button id="start-btn" class="rsrch-btn rsrch-btn-go">Start session</button>
-            </div>
-          </div>
-          <div id="video-stage" class="video-wrap hidden">
-            <video id="intro-vid" playsinline webkit-playsinline preload="auto"
-                   src="${INTRO_VIDEO}"></video>
-            ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
-          </div>`;
-    },
+  css_classes: ["child"],
+      stimulus: function () {
+          return `
+            <div id="video-stage" class="video-wrap">
+              <video id="intro-vid" playsinline webkit-playsinline preload="auto"
+                    src="${INTRO_VIDEO}"></video>
+              ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
+            </div>`;
+      },
     choices: ["Let's go!"],
     button_html: () => `<button id="go-btn" class="go-btn hidden">Let's go!</button>`,
     response_ends_trial: true,
     data: { task: "session_start" },
     on_load: function () {
-        const panel = document.getElementById("rsrch-panel");
-        const stage = document.getElementById("video-stage");
         const vid   = document.getElementById("intro-vid");
         const go    = document.getElementById("go-btn");
         const skip  = document.getElementById("skip-vid");
@@ -226,17 +214,7 @@ const start_and_intro = {
             go.classList.add("pop");
         };
 
-        document.getElementById("redo-btn").addEventListener("click", () => {
-            redo_id = true;
-            jsPsych.finishTrial({ task: "session_start", redo_id: true });
-        });
-
-        document.getElementById("start-btn").addEventListener("click", () => {
-            redo_id = false;
-            panel.classList.add("hidden");
-            stage.classList.remove("hidden");
-            vid.play();               // inside the tap — this is the whole point
-        });
+        vid.play();
 
         vid.addEventListener("ended", revealGo);
         vid.addEventListener("error", () => {
@@ -248,10 +226,7 @@ const start_and_intro = {
     }
 };
 
-const intake = {
-    timeline: [id_screen, start_and_intro],
-    loop_function: () => redo_id
-};
+const intake = { timeline: [id_screen, start_and_intro] };
 
 
 
