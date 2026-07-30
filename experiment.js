@@ -10,7 +10,6 @@ const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim
 const RANDOMIZE_MATCH  = true;   // balanced matched/unmatched assignment of the label
 const MAX_MATCHED_RUN  = 2;      // cap consecutive matched (or unmatched) trials
 const RANDOMIZE_SIDE   = true;   // randomize which side B sits on
-const RESEARCHER_SKIP  = true;   
 
 var jsPsych = initJsPsych();
 
@@ -197,7 +196,6 @@ const intro_video = {
       <div id="video-stage" class="video-wrap pre-play">
         <video id="intro-vid" playsinline webkit-playsinline preload="auto"
                src="${INTRO_VIDEO}"></video>
-        <canvas id="last-frame" class="last-frame hidden"></canvas>
         <button id="play-btn" class="play-btn" aria-label="Play">
           <svg viewBox="0 0 100 100" width="88" height="88" aria-hidden="true">
             <polygon points="34,20 82,50 34,80" fill="#fff"/>
@@ -205,16 +203,13 @@ const intro_video = {
         </button>
         <button id="go-btn" class="go-btn hidden">Let's go!</button>
         <div id="vid-overlay" class="tap-overlay hidden"></div>
-        ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
       </div>`,
     data: { task: "intro_video" },
     on_load: function () {
-        const canvas  = document.getElementById("last-frame");
         const stage   = document.getElementById("video-stage");
         const vid     = document.getElementById("intro-vid");
         const play    = document.getElementById("play-btn");
         const go      = document.getElementById("go-btn");
-        const skip    = document.getElementById("skip-vid");
         const overlay = document.getElementById("vid-overlay");
         const t0      = performance.now();
 
@@ -241,15 +236,7 @@ const intro_video = {
         }, { once: true });
 
         vid.addEventListener("ended", () => {
-            try {
-                canvas.width  = vid.videoWidth;
-                canvas.height = vid.videoHeight;
-                canvas.getContext("2d").drawImage(vid, 0, 0);
-                canvas.classList.remove("hidden");
-                vid.classList.add("hidden");
-            } catch (e) {
-                console.warn("PiCS: couldn't capture the last frame, leaving the video up.", e);
-            }
+            console.log("PiCS: video ended", vid.videoWidth + "x" + vid.videoHeight);
             revealGo();
         });
 
@@ -266,8 +253,6 @@ const intro_video = {
             overlay.classList.remove("hidden");
             overlay.addEventListener("click", revealGo, { once: true });
         });
-
-        if (skip) skip.addEventListener("click", revealGo);
     }
 };
 
