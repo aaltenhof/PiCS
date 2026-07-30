@@ -197,6 +197,7 @@ const intro_video = {
       <div id="video-stage" class="video-wrap pre-play">
         <video id="intro-vid" playsinline webkit-playsinline preload="auto"
                src="${INTRO_VIDEO}"></video>
+        <canvas id="last-frame" class="last-frame hidden"></canvas>
         <button id="play-btn" class="play-btn" aria-label="Play">
           <svg viewBox="0 0 100 100" width="88" height="88" aria-hidden="true">
             <polygon points="34,20 82,50 34,80" fill="#fff"/>
@@ -208,6 +209,7 @@ const intro_video = {
       </div>`,
     data: { task: "intro_video" },
     on_load: function () {
+        const canvas  = document.getElementById("last-frame");
         const stage   = document.getElementById("video-stage");
         const vid     = document.getElementById("intro-vid");
         const play    = document.getElementById("play-btn");
@@ -238,7 +240,18 @@ const intro_video = {
             vid.play();
         }, { once: true });
 
-        vid.addEventListener("ended", revealGo);
+        vid.addEventListener("ended", () => {
+            try {
+                canvas.width  = vid.videoWidth;
+                canvas.height = vid.videoHeight;
+                canvas.getContext("2d").drawImage(vid, 0, 0);
+                canvas.classList.remove("hidden");
+                vid.classList.add("hidden");
+            } catch (e) {
+                console.warn("PiCS: couldn't capture the last frame, leaving the video up.", e);
+            }
+            revealGo();
+        });
 
         vid.addEventListener("error", () => {
             const code = vid.error ? vid.error.code : "?";
