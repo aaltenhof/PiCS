@@ -189,19 +189,10 @@ const id_screen = {
     }
 };
 
-const researcher_ready = {
-    type: jsPsychHtmlButtonResponse,
-    css_classes: ["researcher"],
-    stimulus: () => `<div class="rsrch-kicker">Ready</div>
-                     <div class="id-readout">${participant_id}</div>`,
-    choices: ["Next"],
-    button_html: c => `<button class="rsrch-btn rsrch-btn-go">${c}</button>`,
-    data: { task: "researcher_ready" }
-};
-
 const intro_video = {
     type: jsPsychHtmlButtonResponse,
     css_classes: ["child"],
+    choices: [],
     stimulus: `
       <div id="video-stage" class="video-wrap pre-play">
         <video id="intro-vid" playsinline webkit-playsinline preload="auto"
@@ -211,12 +202,10 @@ const intro_video = {
             <polygon points="34,20 82,50 34,80" fill="#fff"/>
           </svg>
         </button>
+        <button id="go-btn" class="go-btn hidden">Let's go!</button>
         <div id="vid-overlay" class="tap-overlay hidden"></div>
         ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
       </div>`,
-    choices: ["Let's go!"],
-    button_html: () => `<button id="go-btn" class="go-btn hidden">Let's go!</button>`,
-    response_ends_trial: true,
     data: { task: "intro_video" },
     on_load: function () {
         const stage   = document.getElementById("video-stage");
@@ -225,6 +214,7 @@ const intro_video = {
         const go      = document.getElementById("go-btn");
         const skip    = document.getElementById("skip-vid");
         const overlay = document.getElementById("vid-overlay");
+        const t0      = performance.now();
 
         const revealGo = () => {
             go.classList.remove("hidden");
@@ -238,13 +228,17 @@ const intro_video = {
             4: "not found, or not a format Safari can play"
         };
 
+        go.addEventListener("click", () => {
+            jsPsych.finishTrial({ task: "intro_video", rt: Math.round(performance.now() - t0) });
+        });
+
         play.addEventListener("click", () => {
-            stage.classList.remove("pre-play");   // reveal the video
+            stage.classList.remove("pre-play");
             play.remove();
-            vid.play();                           // the child's tap is the gesture
+            vid.play();
         }, { once: true });
 
-        vid.addEventListener("ended", revealGo);  // last frame stays on screen
+        vid.addEventListener("ended", revealGo);
 
         vid.addEventListener("error", () => {
             const code = vid.error ? vid.error.code : "?";
@@ -264,7 +258,7 @@ const intro_video = {
     }
 };
 
-const intake = { timeline: [id_screen, researcher_ready, intro_video] };
+const intake = { timeline: [id_screen, intro_video] };
 
 
 //To-Do: Sample ans sorts

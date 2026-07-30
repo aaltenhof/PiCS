@@ -38,11 +38,11 @@
     --go-glow:    rgba(34, 197, 94, 0.35);
   }
 
-  html, body {
+html, body {
     height: 100%;
     margin: 0;
     padding: 0;
-    background: var(--ink);
+    background: var(--paper);  
     overscroll-behavior: none;
   }
 
@@ -55,11 +55,15 @@
   }
   input { -webkit-user-select: text; user-select: text; }
 
-  .jspsych-display-element {
+.jspsych-display-element {
+    position: fixed;
+    inset: 0;
     height: 100%;
     width: 100%;
+    overflow: auto;
     font-family: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   }
+  
   .jspsych-content-wrapper { height: 100%; }
   .jspsych-content {
     max-width: 100%;
