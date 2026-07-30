@@ -169,6 +169,30 @@
     object-fit: contain;
   }
 
+  .video-wrap.pre-play video { opacity: 0; }
+
+  .play-btn {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 220px;
+    height: 220px;
+    padding-left: 12px;       
+    border: none;
+    border-radius: 50%;
+    background: var(--go);
+    box-shadow: 0 10px 0 var(--go-deep), 0 18px 44px var(--go-glow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 12;
+  }
+  .play-btn:active {
+    transform: translate(-50%, -50%) translateY(6px);
+    box-shadow: 0 4px 0 var(--go-deep), 0 10px 24px var(--go-glow);
+  }
+
   .tap-overlay {
     position: absolute;
     inset: 0;
@@ -185,8 +209,8 @@
   .go-btn {
     position: fixed;
     left: 50%;
-    bottom: 8vh;
-    transform: translateX(-50%);
+    top: 50%;
+    transform: translate(-50%, -50%);
     min-width: 340px;
     min-height: 150px;
     padding: 0 56px;
@@ -201,7 +225,7 @@
     z-index: 10;
   }
   .go-btn:active {
-    transform: translateX(-50%) translateY(6px);
+    transform: translate(-50%, -50%) translateY(6px);
     box-shadow: 0 4px 0 var(--go-deep), 0 10px 24px var(--go-glow);
   }
   .go-btn.pop { animation: pop 420ms cubic-bezier(.2, 1.5, .4, 1) both; }
@@ -217,8 +241,8 @@
   .go-btn-small:active { transform: translateY(4px); }
 
   @keyframes pop {
-    0%   { opacity: 0; transform: translateX(-50%) scale(0.7); }
-    100% { opacity: 1; transform: translateX(-50%) scale(1); }
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+    100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) {
     .go-btn.pop { animation: none; }

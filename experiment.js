@@ -189,45 +189,82 @@ const id_screen = {
     }
 };
 
-const start_and_intro = {
+const researcher_ready = {
     type: jsPsychHtmlButtonResponse,
-  css_classes: ["child"],
-      stimulus: function () {
-          return `
-            <div id="video-stage" class="video-wrap">
-              <video id="intro-vid" playsinline webkit-playsinline preload="auto"
-                    src="${INTRO_VIDEO}"></video>
-              ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
-            </div>`;
-      },
+    css_classes: ["researcher"],
+    stimulus: () => `<div class="rsrch-kicker">Ready</div>
+                     <div class="id-readout">${participant_id}</div>`,
+    choices: ["Next"],
+    button_html: c => `<button class="rsrch-btn rsrch-btn-go">${c}</button>`,
+    data: { task: "researcher_ready" }
+};
+
+const intro_video = {
+    type: jsPsychHtmlButtonResponse,
+    css_classes: ["child"],
+    stimulus: `
+      <div id="video-stage" class="video-wrap pre-play">
+        <video id="intro-vid" playsinline webkit-playsinline preload="auto"
+               src="${INTRO_VIDEO}"></video>
+        <button id="play-btn" class="play-btn" aria-label="Play">
+          <svg viewBox="0 0 100 100" width="88" height="88" aria-hidden="true">
+            <polygon points="34,20 82,50 34,80" fill="#fff"/>
+          </svg>
+        </button>
+        <div id="vid-overlay" class="tap-overlay hidden"></div>
+        ${RESEARCHER_SKIP ? '<button id="skip-vid" class="skip-btn">skip</button>' : ''}
+      </div>`,
     choices: ["Let's go!"],
     button_html: () => `<button id="go-btn" class="go-btn hidden">Let's go!</button>`,
     response_ends_trial: true,
-    data: { task: "session_start" },
+    data: { task: "intro_video" },
     on_load: function () {
-        const vid   = document.getElementById("intro-vid");
-        const go    = document.getElementById("go-btn");
-        const skip  = document.getElementById("skip-vid");
+        const stage   = document.getElementById("video-stage");
+        const vid     = document.getElementById("intro-vid");
+        const play    = document.getElementById("play-btn");
+        const go      = document.getElementById("go-btn");
+        const skip    = document.getElementById("skip-vid");
+        const overlay = document.getElementById("vid-overlay");
 
         const revealGo = () => {
             go.classList.remove("hidden");
             go.classList.add("pop");
         };
 
-        vid.play();
+        const MEDIA_ERR = {
+            1: "aborted",
+            2: "network error",
+            3: "decode error — file is there but the codec isn't Safari-friendly",
+            4: "not found, or not a format Safari can play"
+        };
 
-        vid.addEventListener("ended", revealGo);
+        play.addEventListener("click", () => {
+            stage.classList.remove("pre-play");   // reveal the video
+            play.remove();
+            vid.play();                           // the child's tap is the gesture
+        }, { once: true });
+
+        vid.addEventListener("ended", revealGo);  // last frame stays on screen
+
         vid.addEventListener("error", () => {
-            console.warn("PiCS: intro video failed to load.");
-            revealGo();
+            const code = vid.error ? vid.error.code : "?";
+            const why  = MEDIA_ERR[code] || "unknown";
+            console.error(`PiCS: video failed (code ${code}: ${why})\n  tried: ${vid.currentSrc || INTRO_VIDEO}`);
+            overlay.innerHTML =
+                `<div style="text-align:center;font-size:20px;padding:0 8vw">
+                   Video didn't load (code ${code}: ${why})<br>
+                   <span style="font-size:14px;opacity:.7">${vid.currentSrc || INTRO_VIDEO}</span><br>
+                   <span style="font-size:16px">Tap to continue anyway</span>
+                 </div>`;
+            overlay.classList.remove("hidden");
+            overlay.addEventListener("click", revealGo, { once: true });
         });
 
         if (skip) skip.addEventListener("click", revealGo);
     }
 };
 
-const intake = { timeline: [id_screen, start_and_intro] };
-
+const intake = { timeline: [id_screen, researcher_ready, intro_video] };
 
 
 //To-Do: Sample ans sorts
