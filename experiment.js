@@ -455,7 +455,7 @@ function createSortTrial(t) {
             await playAudio(SORT_ZIB);
 
             place("A", aBox);
-            await pause(700);
+            await pause(1400);
 
             document.getElementById("item-" + firstUp).classList.add("highlighted");
             await playAudio(SORT_ITEM1);
