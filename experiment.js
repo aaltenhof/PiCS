@@ -5,13 +5,18 @@ const INTRO_VIDEO   = "intro_video.mp4";
 const STIM_DIR      = "selected_stim/";
 const LABEL_AUDIO   = "audio/sample/labels/";
 const SUPPORT_AUDIO = "audio/sample/support/";
+const CUE_HERES     = SUPPORT_AUDIO + "heres_a_thing.wav";   // practice only
 const CUE_PICK_ONE  = SUPPORT_AUDIO + "pick_one.wav";
 const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 
-// played before the sample on every Nth trial, alternating between versions
-const CUE_INTRO     = [SUPPORT_AUDIO + "heres_a_thing_1.wav",
-                       SUPPORT_AUDIO + "heres_a_thing_2.wav"];
-const INTRO_EVERY   = 3;
+const SORT_DIR      = "audio/sort/";
+const SORT_ZIB      = SORT_DIR + "instructions/zib/zib_choice_1.wav";
+const SORT_ITEM1    = SORT_DIR + "instructions/item1/your_turn.wav";
+const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
+const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
+
+const BOX_IMG       = "selected_stim/box_open.png";
+const N_BOXES       = 3;
 
 const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
@@ -197,9 +202,8 @@ function playAudio(src) {
     });
 }
 
-function introCue(runOrder) {
-    if ((runOrder - 1) % INTRO_EVERY !== 0) return null;
-    return CUE_INTRO[Math.floor((runOrder - 1) / INTRO_EVERY) % CUE_INTRO.length];
+function pause(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function showFatal(err) {
@@ -347,8 +351,7 @@ function createSampleTrial(t) {
             const btnL = document.getElementById("choice-left");
             const btnR = document.getElementById("choice-right");
 
-            const intro = introCue(t.run_order);
-            if (intro) await playAudio(intro);
+            if (t.trial_type === "practice") await playAudio(CUE_HERES);
             await playAudio(labelSrc(t.matched_label, t.a_audio));
             await playAudio(CUE_PICK_ONE);
 
@@ -385,18 +388,113 @@ function createSampleTrial(t) {
     };
 }
 
-// To-do: sort
 function createSortTrial(t) {
+    // top-row positions and A's box are decided fresh each trial
+    const rowOrder  = shuffle(["A", "B", "X"]);
+    const firstUp   = Math.random() < 0.5 ? "B" : "X";
+    const secondUp  = firstUp === "B" ? "X" : "B";
+    const aBox      = Math.floor(Math.random() * N_BOXES);
+    const endAudio  = SORT_END[Math.floor(Math.random() * SORT_END.length)];
+
+    const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
+
+    const items = rowOrder.map(k =>
+        `<div class="sort-item" id="item-${k}">${stimImg(t, stimOf[k])}</div>`).join("");
+
+    const boxes = Array.from({ length: N_BOXES }, (_, i) =>
+        `<button class="box" id="box-${i}">
+           <img class="box-img" src="${BOX_IMG}" alt="">
+           <div class="box-items" id="box-items-${i}"></div>
+         </button>`).join("");
+
     return {
         type: jsPsychHtmlButtonResponse,
         css_classes: ["child"],
+        choices: [],
         stimulus: `
-          <div class="sort-row">
-            ${stimImg(t, t.a_stim)}${stimImg(t, t.b_stim)}${stimImg(t, t.x_stim)}
+          <div class="sort-stage">
+            <div class="item-row">${items}</div>
+            <div class="box-row" id="box-row">${boxes}</div>
           </div>`,
-        choices: ["Done"],
-        button_html: choice => `<button class="go-btn go-btn-small">${choice}</button>`,
-        data: trialData(t, "sort")
+        data: trialData(t, "sort"),
+        on_load: async function () {
+            const boxRow = document.getElementById("box-row");
+            const boxEls = Array.from({ length: N_BOXES }, (_, i) => document.getElementById("box-" + i));
+
+            const lockBoxes = on => {
+                boxEls.forEach(el => { el.disabled = !on; });
+                boxRow.classList.toggle("active", on);
+            };
+            lockBoxes(false);
+
+            const place = (key, boxIdx) => {
+                const item = document.getElementById("item-" + key);
+                const img  = item.querySelector("img, .stim-missing").cloneNode(true);
+                img.classList.add("box-chip");
+                document.getElementById("box-items-" + boxIdx).appendChild(img);
+                item.classList.remove("highlighted");
+                item.classList.add("placed");
+            };
+
+            // only ever called after the prompt audio has finished
+            const awaitBox = () => new Promise(resolve => {
+                const t0 = performance.now();
+                lockBoxes(true);
+                const handlers = [];
+                boxEls.forEach((el, i) => {
+                    const h = () => {
+                        lockBoxes(false);
+                        boxEls.forEach((e, j) => e.removeEventListener("click", handlers[j]));
+                        resolve({ box: i, rt: Math.round(performance.now() - t0) });
+                    };
+                    handlers.push(h);
+                    el.addEventListener("click", h);
+                });
+            });
+
+            await playAudio(SORT_ZIB);
+
+            place("A", aBox);
+            await pause(700);
+
+            document.getElementById("item-" + firstUp).classList.add("highlighted");
+            await playAudio(SORT_ITEM1);
+            const r1 = await awaitBox();
+            place(firstUp, r1.box);
+            await pause(500);
+
+            document.getElementById("item-" + secondUp).classList.add("highlighted");
+            await playAudio(SORT_ITEM2);
+            const r2 = await awaitBox();
+            place(secondUp, r2.box);
+            await pause(500);
+
+            await playAudio(endAudio);
+
+            const sampleRow = jsPsych.data.get()
+                .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
+
+            jsPsych.finishTrial({
+                rt: r1.rt + r2.rt,
+                row_order: rowOrder.join(""),
+                a_box: aBox,
+                item1: firstUp,
+                item1_stim: stimOf[firstUp],
+                item1_box: r1.box,
+                item1_rt: r1.rt,
+                item1_with_a: r1.box === aBox,
+                item2: secondUp,
+                item2_stim: stimOf[secondUp],
+                item2_box: r2.box,
+                item2_rt: r2.rt,
+                item2_with_a: r2.box === aBox,
+                sampled: sampleRow.sampled,
+                sampled_with_a: sampleRow.sampled
+                    ? (sampleRow.sampled === firstUp ? r1.box === aBox : r2.box === aBox)
+                    : null,
+                end_audio: endAudio
+            });
+        }
     };
 }
 
@@ -460,11 +558,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         type: jsPsychPreload,
         video: [INTRO_VIDEO],
         images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
-        audio: CUE_INTRO.concat([CUE_PICK_ONE, CUE_TO_SORT]).concat(runList.flatMap(t => [
+        audio: [CUE_HERES, CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_ITEM1, SORT_ITEM2]
+            .concat(SORT_END)
+            .concat(runList.flatMap(t => [
             labelSrc(t.matched_label, t.a_audio),
             labelSrc(t.matched_label, t.matched_audio),
             labelSrc(t.unmatched_label, t.unmatched_audio)
-        ])),
+            ])),
         continue_after_error: true,
         show_detailed_errors: true
     };
