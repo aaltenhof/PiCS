@@ -5,8 +5,13 @@ const INTRO_VIDEO   = "intro_video.mp4";
 const STIM_DIR      = "selected_stim/";
 const LABEL_AUDIO   = "audio/sample/labels/";
 const SUPPORT_AUDIO = "audio/sample/support/";
-const CUE_HERES     = SUPPORT_AUDIO + "heres_a_thing.wav";
+const CUE_PICK_ONE  = SUPPORT_AUDIO + "pick_one.wav";
 const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
+
+// played before the sample on every Nth trial, alternating between versions
+const CUE_INTRO     = [SUPPORT_AUDIO + "heres_a_thing_1.wav",
+                       SUPPORT_AUDIO + "heres_a_thing_2.wav"];
+const INTRO_EVERY   = 3;
 
 const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
@@ -169,20 +174,32 @@ function stimImg(t, file, cls = "") {
               onerror="this.outerHTML='<div class=\\'stim stim-missing ${cls}\\'>${file}</div>'">`;
 }
 
+const AUDIO_KEEP = [];
+
 function playAudio(src) {
     return new Promise(resolve => {
         const a = new Audio(src);
-        a.addEventListener("ended", resolve, { once: true });
-        a.addEventListener("error", () => {
-            console.warn("PiCS: audio missing —", src);
+        AUDIO_KEEP.push(a);
+        let done = false;
+        const finish = tag => {
+            if (done) return;
+            done = true;
+            console.log(`PiCS audio ${tag}: ${src}`);
             resolve();
+        };
+        a.addEventListener("ended", () => finish("played"), { once: true });
+        a.addEventListener("error", () => {
+            const c = a.error ? a.error.code : "?";
+            finish(`FAILED code ${c} (4 = missing or undecodable)`);
         });
         const p = a.play();
-        if (p && p.catch) p.catch(err => {
-            console.warn("PiCS: audio blocked —", src, err.name);
-            resolve();
-        });
+        if (p && p.catch) p.catch(err => finish(`BLOCKED ${err.name}`));
     });
+}
+
+function introCue(runOrder) {
+    if ((runOrder - 1) % INTRO_EVERY !== 0) return null;
+    return CUE_INTRO[Math.floor((runOrder - 1) / INTRO_EVERY) % CUE_INTRO.length];
 }
 
 function showFatal(err) {
@@ -330,8 +347,10 @@ function createSampleTrial(t) {
             const btnL = document.getElementById("choice-left");
             const btnR = document.getElementById("choice-right");
 
-            await playAudio(CUE_HERES);
+            const intro = introCue(t.run_order);
+            if (intro) await playAudio(intro);
             await playAudio(labelSrc(t.matched_label, t.a_audio));
+            await playAudio(CUE_PICK_ONE);
 
             row.classList.remove("hidden");
             const t0 = performance.now();
@@ -441,7 +460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         type: jsPsychPreload,
         video: [INTRO_VIDEO],
         images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
-        audio: [CUE_HERES, CUE_TO_SORT].concat(runList.flatMap(t => [
+        audio: CUE_INTRO.concat([CUE_PICK_ONE, CUE_TO_SORT]).concat(runList.flatMap(t => [
             labelSrc(t.matched_label, t.a_audio),
             labelSrc(t.matched_label, t.matched_audio),
             labelSrc(t.unmatched_label, t.unmatched_audio)
