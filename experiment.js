@@ -2,6 +2,7 @@
 const DATAPIPE_ID   = null;              
 const TRIAL_FILE    = "trials.csv";
 const INTRO_VIDEO   = "intro_video.mp4";
+const EXIT_VIDEO    = "exit_video.mp4";
 const STIM_DIR      = "selected_stim/";
 const LABEL_AUDIO   = "audio/sample/labels/";
 const SUPPORT_AUDIO = "audio/sample/support/";
@@ -179,26 +180,61 @@ function stimImg(t, file, cls = "") {
               onerror="this.outerHTML='<div class=\\'stim stim-missing ${cls}\\'>${file}</div>'">`;
 }
 
-const AUDIO_KEEP = [];
+const AUDIO_CACHE = new Map();
 
-function playAudio(src) {
+async function loadBuffer(src) {
+    if (AUDIO_CACHE.has(src)) return AUDIO_CACHE.get(src);
+    const ctx = jsPsych.pluginAPI.audioContext();
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+    AUDIO_CACHE.set(src, buf);
+    return buf;
+}
+
+/* Web Audio rather than <audio>: sample-accurate, and the gain ramps put a
+   ~8ms fade on each end, which kills the click you get when a clip starts or
+   stops on a non-zero sample. */
+async function playAudio(src) {
+    const ctx = jsPsych.pluginAPI.audioContext();
+    if (!ctx) return playAudioFallback(src);
+    try {
+        if (ctx.state !== "running") await ctx.resume();
+        const buf = await loadBuffer(src);
+
+        const source = ctx.createBufferSource();
+        source.buffer = buf;
+        const gain = ctx.createGain();
+        source.connect(gain).connect(ctx.destination);
+
+        const t = ctx.currentTime;
+        const d = buf.duration;
+        const f = Math.min(0.008, d / 4);
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(1, t + f);
+        gain.gain.setValueAtTime(1, t + d - f);
+        gain.gain.linearRampToValueAtTime(0, t + d);
+
+        source.start(t);
+        console.log(`PiCS audio played (${d.toFixed(2)}s): ${src}`);
+        return new Promise(resolve => { source.onended = () => resolve(); });
+    } catch (e) {
+        console.warn(`PiCS audio FAILED — ${src} — ${e.message}`);
+    }
+}
+
+function playAudioFallback(src) {
     return new Promise(resolve => {
         const a = new Audio(src);
-        AUDIO_KEEP.push(a);
         let done = false;
-        const finish = tag => {
-            if (done) return;
-            done = true;
-            console.log(`PiCS audio ${tag}: ${src}`);
-            resolve();
-        };
-        a.addEventListener("ended", () => finish("played"), { once: true });
+        const finish = () => { if (!done) { done = true; resolve(); } };
+        a.addEventListener("ended", finish, { once: true });
         a.addEventListener("error", () => {
-            const c = a.error ? a.error.code : "?";
-            finish(`FAILED code ${c} (4 = missing or undecodable)`);
+            console.warn("PiCS audio FAILED —", src);
+            finish();
         });
         const p = a.play();
-        if (p && p.catch) p.catch(err => finish(`BLOCKED ${err.name}`));
+        if (p && p.catch) p.catch(() => finish());
     });
 }
 
@@ -388,13 +424,14 @@ function createSampleTrial(t) {
     };
 }
 
-function createSortTrial(t) {
+function createSortTrial(t, isLast) {
     // top-row positions and A's box are decided fresh each trial
     const rowOrder  = shuffle(["A", "B", "X"]);
     const firstUp   = Math.random() < 0.5 ? "B" : "X";
     const secondUp  = firstUp === "B" ? "X" : "B";
     const aBox      = Math.floor(Math.random() * N_BOXES);
-    const endAudio  = SORT_END[Math.floor(Math.random() * SORT_END.length)];
+    // the last trial hands off to the exit video instead of a to_sample cue
+    const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
 
     const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
 
@@ -469,7 +506,7 @@ function createSortTrial(t) {
             place(secondUp, r2.box);
             await pause(500);
 
-            await playAudio(endAudio);
+            if (endAudio) await playAudio(endAudio);
 
             const sampleRow = jsPsych.data.get()
                 .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
@@ -498,6 +535,48 @@ function createSortTrial(t) {
     };
 }
 
+
+const exit_video = {
+    type: jsPsychHtmlButtonResponse,
+    css_classes: ["child"],
+    choices: [],
+    stimulus: `
+      <div class="video-wrap">
+        <video id="exit-vid" playsinline webkit-playsinline preload="auto"
+               src="${EXIT_VIDEO}"></video>
+        <div id="exit-overlay" class="tap-overlay hidden"></div>
+      </div>`,
+    data: { task: "exit_video" },
+    on_load: function () {
+        const vid     = document.getElementById("exit-vid");
+        const overlay = document.getElementById("exit-overlay");
+
+        let finished = false;
+        const done = () => {
+            if (finished) return;
+            finished = true;
+            jsPsych.finishTrial({ task: "exit_video" });
+        };
+
+        vid.addEventListener("ended", done);
+        vid.addEventListener("error", () => {
+            const code = vid.error ? vid.error.code : "?";
+            console.warn(`PiCS: exit video failed (code ${code}) — ${vid.currentSrc || EXIT_VIDEO}`);
+            done();
+        });
+
+        const attempt = vid.play();
+        if (attempt && attempt.catch) attempt.catch(err => {
+            console.warn(`PiCS: exit video autoplay blocked (${err.name}) — falling back to tap.`);
+            overlay.textContent = "Tap to continue";
+            overlay.classList.remove("hidden");
+            overlay.addEventListener("click", () => {
+                overlay.classList.add("hidden");
+                vid.play();
+            }, { once: true });
+        });
+    }
+};
 
 const save_data = {
     type: jsPsychPipe,
@@ -556,7 +635,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const preload = {
         type: jsPsychPreload,
-        video: [INTRO_VIDEO],
+        video: [INTRO_VIDEO, EXIT_VIDEO],
         images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
         audio: [CUE_HERES, CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_ITEM1, SORT_ITEM2]
             .concat(SORT_END)
@@ -571,12 +650,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const timeline = [preload, intake];
 
-    for (const t of runList) {
+    runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
-        timeline.push(createSortTrial(t));
-    }
+        timeline.push(createSortTrial(t, i === runList.length - 1));
+    });
 
-    timeline.push(save_node, local_save_node, end_screen);
+    timeline.push(exit_video, save_node, local_save_node, end_screen);
 
     jsPsych.run(timeline);
 });

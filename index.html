@@ -34,10 +34,9 @@
     --line:     #e3e3e0;
     --surface:  #f4f4f5;
     --go:       #22c55e;
+    --pick:     #7c5cff;
     --go-deep:  #15803d;
     --go-glow:  rgba(34, 197, 94, 0.35);
-    --pick:     #7c5cff;
-    
   }
 
   html, body {
@@ -286,8 +285,8 @@
     padding: 18px;
     transition: opacity 200ms ease, border-color 150ms ease;
   }
-  .choice-btn:active { border-color: var(--go); }
-  .choice-btn.chosen { border-color: var(--go); }
+  .choice-btn:active { border-color: var(--pick); }
+  .choice-btn.chosen { border-color: var(--pick); }
   .choice-btn.dimmed { opacity: 0.25; }
   .choice-btn[disabled] { pointer-events: none; }
 
@@ -316,7 +315,8 @@
   }
   .sort-item .stim { width: 190px; height: 190px; }
   .sort-item.highlighted {
-    box-shadow: 0 0 0 6px var(--pick), 0 0 34px rgba(124, 92, 255, 0.35);
+    background: rgba(124, 92, 255, 0.08);
+    box-shadow: 0 0 30px 10px rgba(124, 92, 255, 0.18);
     animation: nudge 1.1s ease-in-out infinite;
   }
   .sort-item.placed { opacity: 0; transform: scale(0.92); pointer-events: none; }
@@ -328,38 +328,44 @@
     padding: 0;
     border-radius: 20px;
   }
-  .box-img { width: 260px; height: 260px; object-fit: contain; display: block; }
+  /* height auto so the art fills the button with no letterboxing */
+  .box-img { width: 270px; height: auto; display: block; position: relative; z-index: 2; }
+  /* chips sit BEHIND the box art, so their lower half is hidden by the flaps
+     and the top peeks over the rim. `top` is the dial to nudge. */
   .box-items {
     position: absolute;
-    inset: 36% 4% 4% 4%;
+    left: 0;
+    right: 0;
+    top: -58px;
+    height: 132px;
+    z-index: 1;
+    pointer-events: none;
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    align-items: center;
-    align-content: center;
+    align-items: flex-end;
     justify-content: center;
-    overflow: visible;
   }
   .box-chip {
-    width: 92px;
-    height: 92px;
+    width: 118px;
+    height: 118px;
     object-fit: contain;
     animation: pop-in 600ms ease-out both;
   }
+  .box-chip + .box-chip { margin-left: -34px; }
 
+  /* all three bounce together, in phase, so no box is more salient than
+     another — box choice is the measure */
   .box-row.active .box-img {
     animation: box-bounce 1.1s ease-in-out infinite;
     animation-delay: 0.25s;
   }
   .box-row.active .box:active { transform: translateY(4px); }
-
-  .box-row.active .box {
-    box-shadow: 0 0 0 5px var(--go), 0 0 30px var(--go-glow);
-  }
-  .box-row.active .box:active { transform: translateY(4px); }
   .box-row:not(.active) .box,
   .box[disabled] { pointer-events: none; }
 
+  @keyframes nudge {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-10px); }
+  }
   @keyframes box-bounce {
     0%, 100% { transform: translateY(0); }
     50%      { transform: translateY(-12px); }
@@ -370,6 +376,7 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .sort-item.highlighted { animation: none; }
+    .box-row.active .box-img { animation: none; }
     .box-chip { animation: none; }
   }
 
