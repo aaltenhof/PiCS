@@ -1,5 +1,4 @@
 trial_id,trial_type,block_ID,stim_type,a_stim,b_stim,x_stim,matched_label,unmatched_label,a_audio,matched_audio,unmatched_audio,force_matched
-p1,practice,0,practice,prac1_a.png,prac1_b.png,prac1_x.png,blicket,toma,prac1_a.mp3,prac1_matched.mp3,prac1_unmatched.mp3,TRUE
 v1,experimental,1,vehicles,aerodyne.png,sikorsky_x.png,altima_treads.png,sarn,deld,called_sarn.wav,sarn.wav,deld.wav,FALSE
 v2,experimental,1,vehicles,japanese_flying_car.png,p791.png,reliant_robin.png,coodle,gasser,called_coodle.wav,coodle.wav,gasser.wav,FALSE
 v3,experimental,1,vehicles,flying_car.png,white_knight.png,pea_car.png,hux,jang,called_hux.wav,hux.wav,jang.wav,FALSE
@@ -10,5 +9,5 @@ f1,experimental,3,fruits,buddhas_hand.png,starfruit.png,rambutan.png,sibu,tever,
 f2,experimental,3,fruits,ackee.png,mangosteen.png,salak.png,vab,tunk,called_vab.wav,vab.wav,tunk.wav,FALSE
 f3,experimental,3,fruits,hala_fruit.png,kiwano.png,miracle_berry.png,wiso,yok,called_wiso.wav,wiso.wav,yok.wav,FALSE
 a1,experimental,4,animals,bilby.png,mole.png,tapir.png,roke,chatten,called_roke.wav,roke.wav,chatten.wav,FALSE
-a2,experimental,4,animals,zebra_duiker.png,saiga.png,box_turtle.png,erag,dunch,called_erag.wav,erag.wav,dunch.wav,FALSE
-a3,experimental,4,animals,quokka.png,tarseier.png,pangolin.png,boskot,juss,called_boskot.wav,boskot.wav,juss.wav,FALSE
+a2,experimental,4,animals,zebra_duiker.png,saiga.png,box_turtle.png,erag,dunch,called_erag.wav,dunch.wav,dunch.wav,FALSE
+a3,experimental,4,animals,quokka.png,tarseier.png,pangolin.png,boskot,huss,called_boskot.wav,boskot.wav,huss.wav,FALSE
