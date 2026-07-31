@@ -352,26 +352,29 @@
   }
   .box-chip + .box-chip { margin-left: -70px; }
 
-  /* all three bounce together, in phase, so no box is more salient than
-     another — box choice is the measure */
-  .box-row.active .box-img {
-    animation: box-bounce 1.1s ease-in-out infinite;
-    animation-delay: 0.25s;
+  /* all three breathe together, in phase, so no box is more salient than
+     another — box choice is the measure. On .box, not .box-img, so the
+     chips already in the box move with it instead of detaching. */
+  .box {
+    transform-origin: 50% 85%;
   }
-  .box-row.active .box:active { transform: translateY(4px); }
+  .box-row.active .box {
+    animation: box-breathe 2.4s ease-in-out infinite;
+  }
+  .box-row.active .box:active { filter: brightness(0.92); }
   .box-row:not(.active) .box,
   .box[disabled] { pointer-events: none; }
 
-  @keyframes box-bounce {
-    0%, 100% { transform: translateY(0); }
-    50%      { transform: translateY(-12px); }
+  @keyframes box-breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.035); }
   }
   @keyframes pop-in {
     0%   { opacity: 0; transform: scale(0.75); }
     100% { opacity: 1; transform: scale(1); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .box-row.active .box-img { animation: none; }
+    .box-row.active .box { animation: none; }
     .box-chip { animation: none; }
   }
 

@@ -2,15 +2,16 @@
 const DATAPIPE_ID   = null;              
 const TRIAL_FILE    = "trials.csv";
 const INTRO_VIDEO   = "intro_video.mp4";
+const EXIT_VIDEO    = "exit_video.mp4";
 const STIM_DIR      = "selected_stim/";
 const LABEL_AUDIO   = "audio/sample/labels/";
 const SUPPORT_AUDIO = "audio/sample/support/";
-const CUE_HERES     = SUPPORT_AUDIO + "heres_a_thing.wav";   // practice only
 const CUE_PICK_ONE  = SUPPORT_AUDIO + "pick_one.wav";
 const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 
 const SORT_DIR      = "audio/sort/";
 const SORT_ZIB      = SORT_DIR + "instructions/zib/zib_choice_1.wav";
+const SORT_FIRST    = SORT_DIR + "instructions/zib/first_trial.wav";
 const SORT_ITEM1    = SORT_DIR + "instructions/item1/your_turn.wav";
 const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
 const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
@@ -216,9 +217,10 @@ async function playAudio(src) {
 
         source.start(t);
         console.log(`PiCS audio played (${d.toFixed(2)}s): ${src}`);
-        return new Promise(resolve => { source.onended = () => resolve(); });
+        return new Promise(resolve => { source.onended = () => resolve(true); });
     } catch (e) {
         console.warn(`PiCS audio FAILED — ${src} — ${e.message}`);
+        return false;
     }
 }
 
@@ -386,7 +388,6 @@ function createSampleTrial(t) {
             const btnL = document.getElementById("choice-left");
             const btnR = document.getElementById("choice-right");
 
-            if (t.trial_type === "practice") await playAudio(CUE_HERES);
             await playAudio(labelSrc(t.matched_label, t.a_audio));
             await playAudio(CUE_PICK_ONE);
 
@@ -423,13 +424,15 @@ function createSampleTrial(t) {
     };
 }
 
-function createSortTrial(t) {
+function createSortTrial(t, isFirst, isLast) {
     // top-row positions and A's box are decided fresh each trial
     const rowOrder  = shuffle(["A", "B", "X"]);
     const firstUp   = Math.random() < 0.5 ? "B" : "X";
     const secondUp  = firstUp === "B" ? "X" : "B";
     const aBox      = Math.floor(Math.random() * N_BOXES);
-    const endAudio  = SORT_END[Math.floor(Math.random() * SORT_END.length)];
+    // first trial gets its own opener; the last hands off to the exit video
+    const zibAudio  = isFirst ? SORT_FIRST : SORT_ZIB;
+    const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
 
     const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
 
@@ -487,7 +490,8 @@ function createSortTrial(t) {
                 });
             });
 
-            await playAudio(SORT_ZIB);
+            const zibOk = await playAudio(zibAudio);
+            if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
 
             place("A", aBox);
             await pause(1400);
@@ -504,7 +508,7 @@ function createSortTrial(t) {
             place(secondUp, r2.box);
             await pause(500);
 
-            await playAudio(endAudio);
+            if (endAudio) await playAudio(endAudio);
 
             const sampleRow = jsPsych.data.get()
                 .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
@@ -523,6 +527,7 @@ function createSortTrial(t) {
                 item2_box: r2.box,
                 item2_rt: r2.rt,
                 item2_with_a: r2.box === aBox,
+                zib_audio: zibAudio,
                 sampled: sampleRow.sampled,
                 sampled_with_a: sampleRow.sampled
                     ? (sampleRow.sampled === firstUp ? r1.box === aBox : r2.box === aBox)
@@ -533,6 +538,48 @@ function createSortTrial(t) {
     };
 }
 
+
+const exit_video = {
+    type: jsPsychHtmlButtonResponse,
+    css_classes: ["child"],
+    choices: [],
+    stimulus: `
+      <div class="video-wrap">
+        <video id="exit-vid" playsinline webkit-playsinline preload="auto"
+               src="${EXIT_VIDEO}"></video>
+        <div id="exit-overlay" class="tap-overlay hidden"></div>
+      </div>`,
+    data: { task: "exit_video" },
+    on_load: function () {
+        const vid     = document.getElementById("exit-vid");
+        const overlay = document.getElementById("exit-overlay");
+
+        let finished = false;
+        const done = () => {
+            if (finished) return;
+            finished = true;
+            jsPsych.finishTrial({ task: "exit_video" });
+        };
+
+        vid.addEventListener("ended", done);
+        vid.addEventListener("error", () => {
+            const code = vid.error ? vid.error.code : "?";
+            console.warn(`PiCS: exit video failed (code ${code}) — ${vid.currentSrc || EXIT_VIDEO}`);
+            done();
+        });
+
+        const attempt = vid.play();
+        if (attempt && attempt.catch) attempt.catch(err => {
+            console.warn(`PiCS: exit video autoplay blocked (${err.name}) — falling back to tap.`);
+            overlay.textContent = "Tap to continue";
+            overlay.classList.remove("hidden");
+            overlay.addEventListener("click", () => {
+                overlay.classList.add("hidden");
+                vid.play();
+            }, { once: true });
+        });
+    }
+};
 
 const save_data = {
     type: jsPsychPipe,
@@ -591,9 +638,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const preload = {
         type: jsPsychPreload,
-        video: [INTRO_VIDEO],
+        video: [INTRO_VIDEO, EXIT_VIDEO],
         images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
-        audio: [CUE_HERES, CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_ITEM1, SORT_ITEM2]
+        audio: [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST, SORT_ITEM1, SORT_ITEM2]
             .concat(SORT_END)
             .concat(runList.flatMap(t => [
             labelSrc(t.matched_label, t.a_audio),
@@ -606,12 +653,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const timeline = [preload, intake];
 
-    for (const t of runList) {
+    runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
-        timeline.push(createSortTrial(t));
-    }
+        timeline.push(createSortTrial(t, i === 0, i === runList.length - 1));
+    });
 
-    timeline.push(save_node, local_save_node, end_screen);
+    timeline.push(exit_video, save_node, local_save_node, end_screen);
 
     jsPsych.run(timeline);
 });
