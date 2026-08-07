@@ -17,7 +17,8 @@ const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
 const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
 
 const BOX_IMG       = "selected_stim/box_open.png";
-const N_BOXES       = 3;
+const ZIB_IMG       = "selected_stim/zib.png";
+const N_BOXES       = 2;
 
 const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
@@ -427,12 +428,13 @@ function createSampleTrial(t) {
 function createSortTrial(t, isFirst, isLast) {
     // top-row positions and A's box are decided fresh each trial
     const rowOrder  = shuffle(["A", "B", "X"]);
-    const firstUp   = Math.random() < 0.5 ? "B" : "X";
-    const secondUp  = firstUp === "B" ? "X" : "B";
     const aBox      = Math.floor(Math.random() * N_BOXES);
     // first trial gets its own opener; the last hands off to the exit video
     const zibAudio  = isFirst ? SORT_FIRST : SORT_ZIB;
     const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
+
+    // A is always the matched label, so its "it's called" clip is a_audio
+    const aCalled   = labelSrc(t.matched_label, t.a_audio);
 
     const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
 
@@ -453,11 +455,22 @@ function createSortTrial(t, isFirst, isLast) {
           <div class="sort-stage">
             <div class="item-row">${items}</div>
             <div class="box-row" id="box-row">${boxes}</div>
+            ${isFirst ? `<img class="zib" src="${ZIB_IMG}" alt="">` : ''}
           </div>`,
         data: trialData(t, "sort"),
         on_load: async function () {
             const boxRow = document.getElementById("box-row");
             const boxEls = Array.from({ length: N_BOXES }, (_, i) => document.getElementById("box-" + i));
+
+            // which object did the child just sample, and what was it called?
+            const sampleRow = jsPsych.data.get()
+                .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
+            const firstUp  = sampleRow.sampled === "X" ? "X" : "B";   // sampled goes first
+            const secondUp = firstUp === "B" ? "X" : "B";
+            const sampledCalled = t.matched
+                ? labelSrc(t.matched_label, t.a_audio)
+                : labelSrc(t.unmatched_label, t.unmatched_audio_called);
+            const sampledLabel = t.matched ? t.matched_label : t.unmatched_label;
 
             const lockBoxes = on => {
                 boxEls.forEach(el => { el.disabled = !on; });
@@ -493,11 +506,15 @@ function createSortTrial(t, isFirst, isLast) {
             const zibOk = await playAudio(zibAudio);
             if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
 
+            document.getElementById("item-A").classList.add("highlighted");
+            await playAudio(aCalled);
             place("A", aBox);
             await pause(1400);
 
+            // sampled object first, and it's the only one that gets re-labelled
             document.getElementById("item-" + firstUp).classList.add("highlighted");
             await playAudio(SORT_ITEM1);
+            await playAudio(sampledCalled);
             const r1 = await awaitBox();
             place(firstUp, r1.box);
             await pause(500);
@@ -510,13 +527,14 @@ function createSortTrial(t, isFirst, isLast) {
 
             if (endAudio) await playAudio(endAudio);
 
-            const sampleRow = jsPsych.data.get()
-                .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
-
             jsPsych.finishTrial({
                 rt: r1.rt + r2.rt,
                 row_order: rowOrder.join(""),
                 a_box: aBox,
+                a_called_audio: aCalled,
+                sampled: sampleRow.sampled,
+                sampled_label: sampledLabel,
+                sampled_called_audio: sampledCalled,
                 item1: firstUp,
                 item1_stim: stimOf[firstUp],
                 item1_box: r1.box,
@@ -527,11 +545,8 @@ function createSortTrial(t, isFirst, isLast) {
                 item2_box: r2.box,
                 item2_rt: r2.rt,
                 item2_with_a: r2.box === aBox,
+                sampled_with_a: r1.box === aBox,
                 zib_audio: zibAudio,
-                sampled: sampleRow.sampled,
-                sampled_with_a: sampleRow.sampled
-                    ? (sampleRow.sampled === firstUp ? r1.box === aBox : r2.box === aBox)
-                    : null,
                 end_audio: endAudio
             });
         }
@@ -645,7 +660,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             .concat(runList.flatMap(t => [
             labelSrc(t.matched_label, t.a_audio),
             labelSrc(t.matched_label, t.matched_audio),
-            labelSrc(t.unmatched_label, t.unmatched_audio)
+            labelSrc(t.unmatched_label, t.unmatched_audio),
+            labelSrc(t.unmatched_label, t.unmatched_audio_called)
             ])),
         continue_after_error: true,
         show_detailed_errors: true

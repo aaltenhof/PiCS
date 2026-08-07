@@ -303,9 +303,20 @@
 
   .item-row, .box-row {
     display: flex;
-    gap: 6vw;
     justify-content: center;
     align-items: flex-end;
+  }
+  .item-row { gap: 6vw; }
+  .box-row  { gap: 14vw; }
+
+  .zib {
+    position: fixed;
+    left: 2vw;
+    bottom: 2vh;
+    width: 200px;
+    height: auto;
+    z-index: 5;
+    pointer-events: none;
   }
 
   .sort-item {
@@ -328,15 +339,15 @@
     border-radius: 20px;
   }
   /* height auto so the art fills the button with no letterboxing */
-  .box-img { width: 270px; height: auto; display: block; position: relative; z-index: 2; }
+  .box-img { width: 320px; height: auto; display: block; position: relative; z-index: 2; }
   /* chips sit in FRONT of the box art, overlapping its top so they read as
      resting in the open box. `top` is the dial to nudge. */
   .box-items {
     position: absolute;
     left: 0;
     right: 0;
-    top: -40px;
-    height: 150px;
+    top: -46px;
+    height: 170px;
     z-index: 3;
     pointer-events: none;
     display: flex;
@@ -344,13 +355,13 @@
     justify-content: center;
   }
   .box-chip {
-    width: 150px;
-    height: 150px;
+    width: 170px;
+    height: 170px;
     object-fit: contain;
     filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.28));
     animation: pop-in 600ms ease-out both;
   }
-  .box-chip + .box-chip { margin-left: -70px; }
+  .box-chip + .box-chip { margin-left: -80px; }
 
   /* all three breathe together, in phase, so no box is more salient than
      another — box choice is the measure. On .box, not .box-img, so the
