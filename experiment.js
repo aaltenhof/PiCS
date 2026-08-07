@@ -39,7 +39,9 @@ const RANDOMIZE_MATCH  = true;   // balanced matched/unmatched assignment of the
 const MAX_MATCHED_RUN  = 2;      // cap consecutive matched (or unmatched) trials
 const RANDOMIZE_SIDE   = true;   // randomize which side B sits on
 
-var jsPsych = initJsPsych();
+var jsPsych = initJsPsych({
+    on_trial_finish: function () { stopAudio(); }
+});
 
 var study_id = "PiCS";
 var participant_id = "";
@@ -212,12 +214,35 @@ async function loadBuffer(src) {
 /* Web Audio rather than <audio>: sample-accurate, and the gain ramps put a
    ~8ms fade on each end, which kills the click you get when a clip starts or
    stops on a non-zero sample. */
+let CURRENT_AUDIO = null;
+
+// Only ever one clip in flight. Anything still sounding is faded out and
+// stopped before the next starts, so nothing can bleed across a trial edge.
+function stopAudio() {
+    if (!CURRENT_AUDIO) return;
+    const { source, gain, ctx, resolve } = CURRENT_AUDIO;
+    CURRENT_AUDIO = null;
+    try {
+        const now = ctx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.linearRampToValueAtTime(0, now + 0.02);
+        source.onended = null;
+        source.stop(now + 0.03);
+    } catch (e) { /* already stopped */ }
+    if (resolve) resolve(false);
+}
+
 async function playAudio(src) {
     const ctx = jsPsych.pluginAPI.audioContext();
     if (!ctx) return playAudioFallback(src);
+    stopAudio();
     try {
         if (ctx.state !== "running") await ctx.resume();
         const buf = await loadBuffer(src);
+
+        // a second call may have landed while this one was decoding
+        stopAudio();
 
         const source = ctx.createBufferSource();
         source.buffer = buf;
@@ -234,7 +259,14 @@ async function playAudio(src) {
 
         source.start(t);
         console.log(`PiCS audio played (${d.toFixed(2)}s): ${src}`);
-        return new Promise(resolve => { source.onended = () => resolve(true); });
+
+        return new Promise(resolve => {
+            CURRENT_AUDIO = { source, gain, ctx, resolve };
+            source.onended = () => {
+                if (CURRENT_AUDIO && CURRENT_AUDIO.source === source) CURRENT_AUDIO = null;
+                resolve(true);
+            };
+        });
     } catch (e) {
         console.warn(`PiCS audio FAILED — ${src} — ${e.message}`);
         return false;
@@ -547,27 +579,31 @@ function createSortTrial(t, isFirst, isLast) {
                 });
             });
 
-            // A is lit for the whole opener — "Zib's doing this one first" —
-            // so the child knows which object is being talked about
+            // A is lit throughout: name it first, then say where Zib is putting it
             highlight("A");
             await pause(400);
+
+            if (aCalled) {
+                await playAudio(aCalled);
+                await pause(300);
+            }
 
             const zibOk = await playAudio(zibAudio);
             if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
 
-            if (aCalled) {
-                await pause(300);
-                await playAudio(aCalled);
-            }
             await pause(600);
             place("A", aBox);
             await pause(1400);
 
             // sampled object first, and it's the only one that gets re-labelled
+            // same shape: name it, then prompt for the box
             highlight(firstUp);
             await pause(400);
+            if (sampledCalled) {
+                await playAudio(sampledCalled);
+                await pause(300);
+            }
             await playAudio(SORT_ITEM1);
-            if (sampledCalled) await playAudio(sampledCalled);
             const r1 = await awaitBox();
             place(firstUp, r1.box);
             await pause(500);
