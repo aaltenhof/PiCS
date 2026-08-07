@@ -16,6 +16,14 @@ const SORT_ITEM1    = SORT_DIR + "instructions/item1/your_turn.wav";
 const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
 const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
 
+// Seconds into each opener at which the word "put" lands. The object starts
+// flying to the box at that moment instead of waiting for the clip to finish.
+// null = wait for the audio to end (the old behaviour).
+const PUT_CUE_AT = new Map([
+    [SORT_ZIB,   1.82],
+    [SORT_FIRST, null]   // no "put" in this one — place after it finishes
+]);
+
 const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
 const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
@@ -233,7 +241,9 @@ function stopAudio() {
     if (resolve) resolve(false);
 }
 
-async function playAudio(src) {
+/* opts.cueAt / opts.onCue fire a callback partway through the clip, so a
+   visual can be timed to a word rather than to the end of the file. */
+async function playAudio(src, opts = {}) {
     const ctx = jsPsych.pluginAPI.audioContext();
     if (!ctx) return playAudioFallback(src);
     stopAudio();
@@ -259,6 +269,14 @@ async function playAudio(src) {
 
         source.start(t);
         console.log(`PiCS audio played (${d.toFixed(2)}s): ${src}`);
+
+        if (opts.onCue && opts.cueAt != null) {
+            const cueMs = Math.max(0, Math.min(opts.cueAt, d) * 1000);
+            setTimeout(() => {
+                // don't fire if this clip was cut short
+                if (CURRENT_AUDIO && CURRENT_AUDIO.source === source) opts.onCue();
+            }, cueMs);
+        }
 
         return new Promise(resolve => {
             CURRENT_AUDIO = { source, gain, ctx, resolve };
@@ -590,13 +608,15 @@ function createSortTrial(t, isFirst, isLast) {
                 }));
 
                 setTimeout(() => {
+                    // reveal the chip first, drop the flier a frame later, and
+                    // never restore pop-in — re-enabling it here would replay
+                    // the entrance animation and read as a flicker
                     chip.style.visibility = "";
-                    chip.style.animation = "";
-                    flier.remove();
+                    requestAnimationFrame(() => flier.remove());
                     item.classList.add("placed");
                     item.style.visibility = "";
                     resolve();
-                }, 900);
+                }, 1300);
             });
 
             // only ever called after the prompt audio has finished
@@ -621,9 +641,18 @@ function createSortTrial(t, isFirst, isLast) {
             highlight("A");
             await pause(400);
 
+            // A starts moving on the word "put", if we know where that is
+            let aFlight = null;
+            const startAFlight = () => { if (!aFlight) aFlight = place("A", aBox); };
+
             const playOpener = async () => {
-                const ok = await playAudio(zibAudio);
-                if (!ok && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
+                const cueAt = PUT_CUE_AT.get(zibAudio);
+                const ok = await playAudio(zibAudio, { cueAt: cueAt, onCue: startAFlight });
+                if (!ok && zibAudio !== SORT_ZIB) {
+                    await playAudio(SORT_ZIB, {
+                        cueAt: PUT_CUE_AT.get(SORT_ZIB), onCue: startAFlight
+                    });
+                }
             };
             const playLabel = async () => {
                 if (!aCalled) return;
@@ -640,8 +669,13 @@ function createSortTrial(t, isFirst, isLast) {
                 await playOpener();
             }
 
-            await pause(600);
-            await place("A", aBox);
+            // if no cue time is set (or the audio failed), fall back to placing
+            // A after the opener finishes
+            if (!aFlight) {
+                await pause(600);
+                startAFlight();
+            }
+            await aFlight;
             await pause(800);
 
             // Zib has done his turn — he steps aside for the child
