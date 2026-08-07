@@ -1,8 +1,10 @@
 
-const DATAPIPE_ID   = null;              
+const DATAPIPE_ID   = "Rcnn6TF27ps9";
 const TRIAL_FILE    = "trials.csv";
 const INTRO_VIDEO   = "intro_video.mp4";
 const EXIT_VIDEO    = "exit_video.mp4";
+const HALFWAY_VIDEO = "zib_half_packed.mp4";
+const HALFWAY_AFTER = 8;   // plays after this many experimental trials (8 of 12)
 const STIM_DIR      = "selected_stim/";
 const LABEL_AUDIO   = "audio/sample/labels/";
 const SUPPORT_AUDIO = "audio/sample/support/";
@@ -737,47 +739,54 @@ function createSortTrial(t, isFirst, isLast) {
 }
 
 
-const exit_video = {
-    type: jsPsychHtmlButtonResponse,
-    css_classes: ["child"],
-    choices: [],
-    stimulus: `
-      <div class="video-wrap">
-        <video id="exit-vid" playsinline webkit-playsinline preload="auto"
-               src="${EXIT_VIDEO}"></video>
-        <div id="exit-overlay" class="tap-overlay hidden"></div>
-      </div>`,
-    data: { task: "exit_video" },
-    on_load: function () {
-        const vid     = document.getElementById("exit-vid");
-        const overlay = document.getElementById("exit-overlay");
+/* A full-screen video that plays itself and moves on when it ends. Used for
+   the halfway break and the exit. Autoplay is allowed here because the child
+   has already interacted with the page many times. */
+function createVideoTrial(src, task) {
+    return {
+        type: jsPsychHtmlButtonResponse,
+        css_classes: ["child"],
+        choices: [],
+        stimulus: `
+          <div class="video-wrap">
+            <video id="vid-${task}" playsinline webkit-playsinline preload="auto"
+                   src="${src}"></video>
+            <div id="ov-${task}" class="tap-overlay hidden"></div>
+          </div>`,
+        data: { task: task },
+        on_load: function () {
+            const vid     = document.getElementById("vid-" + task);
+            const overlay = document.getElementById("ov-" + task);
 
-        let finished = false;
-        const done = () => {
-            if (finished) return;
-            finished = true;
-            jsPsych.finishTrial({ task: "exit_video" });
-        };
+            let finished = false;
+            const done = () => {
+                if (finished) return;
+                finished = true;
+                jsPsych.finishTrial({ task: task });
+            };
 
-        vid.addEventListener("ended", done);
-        vid.addEventListener("error", () => {
-            const code = vid.error ? vid.error.code : "?";
-            console.warn(`PiCS: exit video failed (code ${code}) — ${vid.currentSrc || EXIT_VIDEO}`);
-            done();
-        });
+            vid.addEventListener("ended", done);
+            vid.addEventListener("error", () => {
+                const code = vid.error ? vid.error.code : "?";
+                console.warn(`PiCS: ${task} failed (code ${code}) — ${vid.currentSrc || src}`);
+                done();
+            });
 
-        const attempt = vid.play();
-        if (attempt && attempt.catch) attempt.catch(err => {
-            console.warn(`PiCS: exit video autoplay blocked (${err.name}) — falling back to tap.`);
-            overlay.textContent = "Tap to continue";
-            overlay.classList.remove("hidden");
-            overlay.addEventListener("click", () => {
-                overlay.classList.add("hidden");
-                vid.play();
-            }, { once: true });
-        });
-    }
-};
+            const attempt = vid.play();
+            if (attempt && attempt.catch) attempt.catch(err => {
+                console.warn(`PiCS: ${task} autoplay blocked (${err.name}) — falling back to tap.`);
+                overlay.textContent = "Tap to continue";
+                overlay.classList.remove("hidden");
+                overlay.addEventListener("click", () => {
+                    overlay.classList.add("hidden");
+                    vid.play();
+                }, { once: true });
+            });
+        }
+    };
+}
+
+const exit_video = createVideoTrial(EXIT_VIDEO, "exit_video");
 
 const save_data = {
     type: jsPsychPipe,
@@ -836,7 +845,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const preload = {
         type: jsPsychPreload,
-        video: [INTRO_VIDEO, EXIT_VIDEO],
+        video: [INTRO_VIDEO, EXIT_VIDEO, HALFWAY_VIDEO],
         images: [BOX_IMG, ZIB_IMG]
             .concat([PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
                 .map(f => PRAC_STIM + f))
@@ -865,6 +874,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
         timeline.push(createSortTrial(t, i === 0, i === runList.length - 1));
+        // Zib's box is two-thirds full — a break, not an end
+        if (i === HALFWAY_AFTER - 1 && i < runList.length - 1) {
+            timeline.push(createVideoTrial(HALFWAY_VIDEO, "halfway_video"));
+        }
     });
 
     timeline.push(exit_video, save_node, local_save_node, end_screen);
