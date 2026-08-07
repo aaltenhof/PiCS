@@ -16,6 +16,19 @@ const SORT_ITEM1    = SORT_DIR + "instructions/item1/your_turn.wav";
 const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
 const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
 
+const PRACTICE_DIR  = "audio/practice/";
+const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
+const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
+const PRAC_STIM     = "selected_stim/practice/";
+const PRAC_TRIAL    = {
+    trial_id: "practice",
+    trial_type: "practice",
+    stim_type: "practice",
+    a_stim: "corgi.jpg",
+    b_stim: "pom.jpg",
+    x_stim: "golden.jpg"
+};
+
 const BOX_IMG       = "selected_stim/box_open.png";
 const ZIB_IMG       = "selected_stim/zib.png";
 const N_BOXES       = 2;
@@ -168,11 +181,14 @@ function buildRunList(bank) {
 
 
 function triadDir(t) {
+    if (t.trial_type === "practice") return PRAC_STIM;
     const n = String(t.trial_id).replace(/\D/g, "") || "1";
     return `${STIM_DIR}${t.stim_type}/triad${n}/`;
 }
 
-function stimSrc(t, file) { return triadDir(t) + file; }
+function stimSrc(t, file) {
+    return t.trial_type === "practice" ? PRAC_STIM + file : triadDir(t) + file;
+}
 
 function labelSrc(label, file) { return `${LABEL_AUDIO}${label}/${file}`; }
 
@@ -389,8 +405,15 @@ function createSampleTrial(t) {
             const btnL = document.getElementById("choice-left");
             const btnR = document.getElementById("choice-right");
 
-            await playAudio(labelSrc(t.matched_label, t.a_audio));
-            await playAudio(CUE_PICK_ONE);
+            if (t.trial_type === "practice") {
+                await playAudio(PRAC_INTRO);
+                await playAudio(PRAC_SAMPLE);
+            } else {
+                // "It's called a sibu!" then "Sibu!"
+                await playAudio(labelSrc(t.matched_label, t.a_audio));
+                await playAudio(labelSrc(t.matched_label, t.matched_audio));
+                await playAudio(CUE_PICK_ONE);
+            }
 
             row.classList.remove("hidden");
             const t0 = performance.now();
@@ -404,10 +427,18 @@ function createSampleTrial(t) {
 
                 const sampled     = isLeft === leftIsB ? "B" : "X";
                 const sampledStim = isLeft ? leftStim : rightStim;
-                const heardLabel  = t.matched ? t.matched_label : t.unmatched_label;
-                const heardFile   = t.matched ? t.matched_audio : t.unmatched_audio;
+                // practice has no labels, so it goes straight to the sort cue
+                const isPractice  = t.trial_type === "practice";
+                const heardLabel  = isPractice ? null : (t.matched ? t.matched_label : t.unmatched_label);
+                const heardFile   = isPractice ? null : (t.matched ? t.matched_audio : t.unmatched_audio);
+                const framingFile = isPractice ? null : (t.matched ? t.matched_audio_also : t.unmatched_audio_called);
 
-                await playAudio(labelSrc(heardLabel, heardFile));
+                if (!isPractice) {
+                    // matched: "It's ALSO called a sibu! Sibu!"
+                    // unmatched: "It's called a dern! Dern!"
+                    await playAudio(labelSrc(heardLabel, framingFile));
+                    await playAudio(labelSrc(heardLabel, heardFile));
+                }
                 await playAudio(CUE_TO_SORT);
 
                 jsPsych.finishTrial({
@@ -415,7 +446,9 @@ function createSampleTrial(t) {
                     sampled: sampled,
                     sampled_stim: sampledStim,
                     sampled_side: isLeft ? "left" : "right",
-                    heard_label: heardLabel
+                    heard_label: heardLabel,
+                    heard_framing_audio: isPractice ? null : labelSrc(heardLabel, framingFile),
+                    heard_label_audio: isPractice ? null : labelSrc(heardLabel, heardFile)
                 });
             };
 
@@ -433,8 +466,9 @@ function createSortTrial(t, isFirst, isLast) {
     const zibAudio  = isFirst ? SORT_FIRST : SORT_ZIB;
     const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
 
+    const isPractice = t.trial_type === "practice";
     // A is always the matched label, so its "it's called" clip is a_audio
-    const aCalled   = labelSrc(t.matched_label, t.a_audio);
+    const aCalled   = isPractice ? null : labelSrc(t.matched_label, t.a_audio);
 
     const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
 
@@ -456,7 +490,7 @@ function createSortTrial(t, isFirst, isLast) {
           <div class="sort-stage">
             <div class="item-row" id="item-row">${items}</div>
             <div class="box-row" id="box-row">${boxes}</div>
-            ${isFirst ? `<img class="zib" src="${ZIB_IMG}" alt="">` : ''}
+            <img class="zib" src="${ZIB_IMG}" alt="">
           </div>`,
         data: trialData(t, "sort"),
         on_load: async function () {
@@ -476,10 +510,10 @@ function createSortTrial(t, isFirst, isLast) {
                 .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
             const firstUp  = sampleRow.sampled === "X" ? "X" : "B";   // sampled goes first
             const secondUp = firstUp === "B" ? "X" : "B";
-            const sampledCalled = t.matched
+            const sampledCalled = isPractice ? null : (t.matched
                 ? labelSrc(t.matched_label, t.a_audio)
-                : labelSrc(t.unmatched_label, t.unmatched_audio_called);
-            const sampledLabel = t.matched ? t.matched_label : t.unmatched_label;
+                : labelSrc(t.unmatched_label, t.unmatched_audio_called));
+            const sampledLabel = isPractice ? null : (t.matched ? t.matched_label : t.unmatched_label);
 
             const lockBoxes = on => {
                 boxEls.forEach(el => { el.disabled = !on; });
@@ -513,12 +547,18 @@ function createSortTrial(t, isFirst, isLast) {
                 });
             });
 
+            // A is lit for the whole opener — "Zib's doing this one first" —
+            // so the child knows which object is being talked about
+            highlight("A");
+            await pause(400);
+
             const zibOk = await playAudio(zibAudio);
             if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
 
-            highlight("A");
-            await pause(500);
-            await playAudio(aCalled);
+            if (aCalled) {
+                await pause(300);
+                await playAudio(aCalled);
+            }
             await pause(600);
             place("A", aBox);
             await pause(1400);
@@ -527,7 +567,7 @@ function createSortTrial(t, isFirst, isLast) {
             highlight(firstUp);
             await pause(400);
             await playAudio(SORT_ITEM1);
-            await playAudio(sampledCalled);
+            if (sampledCalled) await playAudio(sampledCalled);
             const r1 = await awaitBox();
             place(firstUp, r1.box);
             await pause(500);
@@ -668,12 +708,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     const preload = {
         type: jsPsychPreload,
         video: [INTRO_VIDEO, EXIT_VIDEO],
-        images: runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f))),
-        audio: [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST, SORT_ITEM1, SORT_ITEM2]
+        images: [BOX_IMG, ZIB_IMG]
+            .concat([PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
+                .map(f => PRAC_STIM + f))
+            .concat(runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)))),
+        audio: [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST, SORT_ITEM1, SORT_ITEM2,
+                PRAC_INTRO, PRAC_SAMPLE]
             .concat(SORT_END)
             .concat(runList.flatMap(t => [
             labelSrc(t.matched_label, t.a_audio),
             labelSrc(t.matched_label, t.matched_audio),
+            labelSrc(t.matched_label, t.matched_audio_also),
             labelSrc(t.unmatched_label, t.unmatched_audio),
             labelSrc(t.unmatched_label, t.unmatched_audio_called)
             ])),
@@ -682,6 +727,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     const timeline = [preload, intake];
+
+    // hand-coded practice: no labels, keeps the full first-trial sort framing
+    const practice = Object.assign({}, PRAC_TRIAL, { run_order: 0, matched: null, b_side: "left" });
+    timeline.push(createSampleTrial(practice));
+    timeline.push(createSortTrial(practice, true, false));
 
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
