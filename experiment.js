@@ -24,9 +24,9 @@ const PRAC_TRIAL    = {
     trial_id: "practice",
     trial_type: "practice",
     stim_type: "practice",
-    a_stim: "corgi.jpg",
-    b_stim: "pom.jpg",
-    x_stim: "golden.jpg"
+    a_stim: "corgi.png",
+    b_stim: "pom.png",
+    x_stim: "golden.png"
 };
 
 const BOX_IMG       = "selected_stim/box_open.png";
@@ -522,7 +522,7 @@ function createSortTrial(t, isFirst, isLast) {
           <div class="sort-stage">
             <div class="item-row" id="item-row">${items}</div>
             <div class="box-row" id="box-row">${boxes}</div>
-            <img class="zib" src="${ZIB_IMG}" alt="">
+            <img class="zib" id="zib" src="${ZIB_IMG}" alt="">
           </div>`,
         data: trialData(t, "sort"),
         on_load: async function () {
@@ -553,15 +553,51 @@ function createSortTrial(t, isFirst, isLast) {
             };
             lockBoxes(false);
 
-            const place = (key, boxIdx) => {
-                const item = document.getElementById("item-" + key);
-                const img  = item.querySelector("img, .stim-missing").cloneNode(true);
-                img.classList.add("box-chip");
-                document.getElementById("box-items-" + boxIdx).appendChild(img);
+            /* Measure where the object is, measure where it's going, then fly a
+               clone between the two so the child sees it travel into the box
+               rather than vanish and reappear. */
+            const place = (key, boxIdx) => new Promise(resolve => {
+                const item   = document.getElementById("item-" + key);
+                const source = item.querySelector("img, .stim-missing");
+                const from   = source.getBoundingClientRect();
+
+                // put the chip in place but invisible, so we can measure its target
+                const chip = source.cloneNode(true);
+                chip.classList.add("box-chip");
+                chip.style.visibility = "hidden";
+                chip.style.animation = "none";
+                document.getElementById("box-items-" + boxIdx).appendChild(chip);
+                const to = chip.getBoundingClientRect();
+
                 item.classList.remove("highlighted");
-                item.classList.add("placed");
                 itemRow.classList.remove("has-highlight");
-            };
+                item.style.visibility = "hidden";
+
+                const flier = source.cloneNode(true);
+                flier.className = "flier";
+                flier.style.left   = from.left + "px";
+                flier.style.top    = from.top + "px";
+                flier.style.width  = from.width + "px";
+                flier.style.height = from.height + "px";
+                document.body.appendChild(flier);
+
+                const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
+                const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
+                const scale = to.width / from.width;
+
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                    flier.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+                }));
+
+                setTimeout(() => {
+                    chip.style.visibility = "";
+                    chip.style.animation = "";
+                    flier.remove();
+                    item.classList.add("placed");
+                    item.style.visibility = "";
+                    resolve();
+                }, 900);
+            });
 
             // only ever called after the prompt audio has finished
             const awaitBox = () => new Promise(resolve => {
@@ -605,8 +641,16 @@ function createSortTrial(t, isFirst, isLast) {
             }
 
             await pause(600);
-            place("A", aBox);
-            await pause(1400);
+            await place("A", aBox);
+            await pause(800);
+
+            // Zib has done his turn — he steps aside for the child
+            const zib = document.getElementById("zib");
+            if (zib) {
+                zib.classList.add("gone");
+                await pause(500);
+                zib.remove();
+            }
 
             // sampled object first, and it's the only one that gets re-labelled
             // same shape: name it, then prompt for the box
@@ -618,15 +662,15 @@ function createSortTrial(t, isFirst, isLast) {
             }
             await playAudio(SORT_ITEM1);
             const r1 = await awaitBox();
-            place(firstUp, r1.box);
-            await pause(500);
+            await place(firstUp, r1.box);
+            await pause(400);
 
             highlight(secondUp);
             await pause(400);
             await playAudio(SORT_ITEM2);
             const r2 = await awaitBox();
-            place(secondUp, r2.box);
-            await pause(500);
+            await place(secondUp, r2.box);
+            await pause(400);
 
             if (endAudio) await playAudio(endAudio);
 
