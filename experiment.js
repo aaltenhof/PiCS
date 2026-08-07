@@ -609,12 +609,14 @@ function createSortTrial(t, isFirst, isLast) {
 
                 setTimeout(() => {
                     // reveal the chip first, drop the flier a frame later, and
-                    // never restore pop-in — re-enabling it here would replay
-                    // the entrance animation and read as a flicker
+                    // never restore pop-in — re-enabling it would replay the
+                    // entrance animation and read as a flicker
                     chip.style.visibility = "";
                     requestAnimationFrame(() => flier.remove());
+                    // the original stays hidden for good. Restoring visibility
+                    // here would let .placed fade it from opacity 1 to 0 in the
+                    // row, which reads as the object blinking back into place.
                     item.classList.add("placed");
-                    item.style.visibility = "";
                     resolve();
                 }, 1300);
             });
