@@ -579,17 +579,30 @@ function createSortTrial(t, isFirst, isLast) {
                 });
             });
 
-            // A is lit throughout: name it first, then say where Zib is putting it
+            // A is lit throughout. Normally: name it, then say where Zib puts it.
+            // On the first trial the opener explains the task, so it has to come
+            // before the label — otherwise the child hears "it's a wiso" cold.
             highlight("A");
             await pause(400);
 
-            if (aCalled) {
+            const playOpener = async () => {
+                const ok = await playAudio(zibAudio);
+                if (!ok && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
+            };
+            const playLabel = async () => {
+                if (!aCalled) return;
                 await playAudio(aCalled);
                 await pause(300);
-            }
+            };
 
-            const zibOk = await playAudio(zibAudio);
-            if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
+            if (isFirst) {
+                await playOpener();
+                await pause(300);
+                await playLabel();
+            } else {
+                await playLabel();
+                await playOpener();
+            }
 
             await pause(600);
             place("A", aBox);
