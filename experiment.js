@@ -441,6 +441,7 @@ function createSortTrial(t, isFirst, isLast) {
     const items = rowOrder.map(k =>
         `<div class="sort-item" id="item-${k}">${stimImg(t, stimOf[k])}</div>`).join("");
 
+
     const boxes = Array.from({ length: N_BOXES }, (_, i) =>
         `<button class="box" id="box-${i}">
            <img class="box-img" src="${BOX_IMG}" alt="">
@@ -453,14 +454,22 @@ function createSortTrial(t, isFirst, isLast) {
         choices: [],
         stimulus: `
           <div class="sort-stage">
-            <div class="item-row">${items}</div>
+            <div class="item-row" id="item-row">${items}</div>
             <div class="box-row" id="box-row">${boxes}</div>
             ${isFirst ? `<img class="zib" src="${ZIB_IMG}" alt="">` : ''}
           </div>`,
         data: trialData(t, "sort"),
         on_load: async function () {
-            const boxRow = document.getElementById("box-row");
-            const boxEls = Array.from({ length: N_BOXES }, (_, i) => document.getElementById("box-" + i));
+            const boxRow  = document.getElementById("box-row");
+            const itemRow = document.getElementById("item-row");
+            const boxEls  = Array.from({ length: N_BOXES }, (_, i) => document.getElementById("box-" + i));
+
+            const highlight = key => {
+                itemRow.querySelectorAll(".sort-item")
+                    .forEach(el => el.classList.remove("highlighted"));
+                itemRow.classList.toggle("has-highlight", !!key);
+                if (key) document.getElementById("item-" + key).classList.add("highlighted");
+            };
 
             // which object did the child just sample, and what was it called?
             const sampleRow = jsPsych.data.get()
@@ -485,6 +494,7 @@ function createSortTrial(t, isFirst, isLast) {
                 document.getElementById("box-items-" + boxIdx).appendChild(img);
                 item.classList.remove("highlighted");
                 item.classList.add("placed");
+                itemRow.classList.remove("has-highlight");
             };
 
             // only ever called after the prompt audio has finished
@@ -506,20 +516,24 @@ function createSortTrial(t, isFirst, isLast) {
             const zibOk = await playAudio(zibAudio);
             if (!zibOk && zibAudio !== SORT_ZIB) await playAudio(SORT_ZIB);
 
-            document.getElementById("item-A").classList.add("highlighted");
+            highlight("A");
+            await pause(500);
             await playAudio(aCalled);
+            await pause(600);
             place("A", aBox);
             await pause(1400);
 
             // sampled object first, and it's the only one that gets re-labelled
-            document.getElementById("item-" + firstUp).classList.add("highlighted");
+            highlight(firstUp);
+            await pause(400);
             await playAudio(SORT_ITEM1);
             await playAudio(sampledCalled);
             const r1 = await awaitBox();
             place(firstUp, r1.box);
             await pause(500);
 
-            document.getElementById("item-" + secondUp).classList.add("highlighted");
+            highlight(secondUp);
+            await pause(400);
             await playAudio(SORT_ITEM2);
             const r2 = await awaitBox();
             place(secondUp, r2.box);

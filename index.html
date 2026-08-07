@@ -320,14 +320,28 @@
   }
 
   .sort-item {
-    transition: opacity 650ms ease, transform 650ms ease;
-    border-radius: 20px;
-    padding: 10px;
+    transition: opacity 650ms ease, transform 400ms ease,
+                background-color 300ms ease, box-shadow 300ms ease;
+    border-radius: 26px;
+    padding: 14px;
+    background: transparent;
   }
   .sort-item .stim { width: 190px; height: 190px; }
+
+  /* scale carries the signal; the tint and glow support it. Purple, not
+     green, so it reads as "this one now" rather than "this one is right". */
   .sort-item.highlighted {
-    background: rgba(124, 92, 255, 0.08);
-    box-shadow: 0 0 30px 10px rgba(124, 92, 255, 0.18);
+    background: rgba(124, 92, 255, 0.16);
+    box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.45),
+                0 0 34px 12px rgba(124, 92, 255, 0.30);
+    transform: scale(1.12);
+  }
+  /* the other two recede while one is highlighted */
+  .item-row.has-highlight .sort-item:not(.highlighted):not(.placed) {
+    opacity: 0.45;
+  }
+  .sort-item:not(.highlighted):not(.placed) {
+    transition: opacity 300ms ease;
   }
   .sort-item.placed { opacity: 0; transform: scale(0.92); pointer-events: none; }
 
