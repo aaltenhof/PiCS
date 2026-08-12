@@ -72,7 +72,7 @@ jsPsych.data.addProperties({
 
 // load trials
 const REQUIRED_COLUMNS = [
-    "trial_id", "trial_type", "block_ID", "stim_type",
+    "trial_id", "trial_type", "stim_type",
     "a_stim", "b_stim", "x_stim", "matched_label", "unmatched_label"
 ];
 
@@ -110,7 +110,6 @@ function loadTrials(url) {
                 }
 
                 resolve(rows.map(r => Object.assign({}, r, {
-                    block_ID: r.block_ID === "" ? null : Number(r.block_ID),
                     force_matched: r.force_matched === "" || r.force_matched === undefined
                         ? undefined : asBool(r.force_matched)
                 })));
@@ -430,10 +429,8 @@ function trialData(t, task) {
         task: task,
         trial_id: t.trial_id,
         run_order: t.run_order,
-        con_trial_num: (t.run_order - 1) * 2 + (task === "sample" ? 1 : 2),
         phase: t.trial_type,          // "practice" | "experimental"
         is_practice: t.trial_type === "practice",
-        block_ID: t.block_ID,
         stim_type: t.stim_type,
         triad_dir: triadDir(t),
         a_stim: t.a_stim, b_stim: t.b_stim, x_stim: t.x_stim,
@@ -488,8 +485,10 @@ function createSampleTrial(t) {
                 other.classList.add("dimmed");
                 btn.classList.add("chosen");
 
-                const sampled     = isLeft === leftIsB ? "B" : "X";
-                const sampledStim = isLeft ? leftStim : rightStim;
+                const sampled       = isLeft === leftIsB ? "B" : "X";
+                const sampledStim   = isLeft ? leftStim : rightStim;
+                const unsampled     = sampled === "B" ? "X" : "B";
+                const unsampledStim = isLeft ? rightStim : leftStim;
                 // practice has no labels, so it goes straight to the sort cue
                 const isPractice  = t.trial_type === "practice";
                 const heardLabel  = isPractice ? null : (t.matched ? t.matched_label : t.unmatched_label);
@@ -509,6 +508,8 @@ function createSampleTrial(t) {
                     sampled: sampled,
                     sampled_stim: sampledStim,
                     sampled_side: isLeft ? "left" : "right",
+                    unsampled: unsampled,
+                    unsampled_stim: unsampledStim,
                     heard_label: heardLabel,
                     heard_framing_audio: isPractice ? null : labelSrc(heardLabel, framingFile),
                     heard_label_audio: isPractice ? null : labelSrc(heardLabel, heardFile)
@@ -728,20 +729,16 @@ function createSortTrial(t, isFirst, isLast) {
                 row_order: rowOrder.join(""),
                 a_box: aBox,
                 a_called_audio: aCalled,
-                sampled: sampleRow.sampled,
                 sampled_label: sampledLabel,
                 sampled_called_audio: sampledCalled,
-                item1: firstUp,
-                item1_stim: stimOf[firstUp],
-                item1_box: r1.box,
-                item1_rt: r1.rt,
-                item1_with_a: r1.box === aBox,
-                item2: secondUp,
-                item2_stim: stimOf[secondUp],
-                item2_box: r2.box,
-                item2_rt: r2.rt,
-                item2_with_a: r2.box === aBox,
-                sampled_with_a: r1.box === aBox,
+                sampled: firstUp,
+                sampled_stim: stimOf[firstUp],
+                sampled_box: r1.box,
+                sampled_box_rt: r1.rt,
+                unsampled: secondUp,
+                unsampled_stim: stimOf[secondUp],
+                unsampled_box: r2.box,
+                unsampled_box_rt: r2.rt,
                 zib_audio: zibAudio,
                 end_audio: endAudio
             });
@@ -805,13 +802,13 @@ const exit_video = createVideoTrial(EXIT_VIDEO, "exit_video");
 const OUT_COLUMNS = [
     "participant_id", "participant_age", "study_id", "session_date", "session_time",
     "run_order", "con_trial_num", "task",
-    "trial_id", "trial_type", "block_ID", "stim_type",
+    "trial_id", "trial_type", "stim_type",
     "a_stim", "b_stim", "x_stim",
     "matched", "matched_label", "unmatched_label", "heard_label",
-    "b_side", "sampled", "sampled_stim", "sampled_side",
-    "a_box", "item1", "item1_box", "item1_rt", "item1_with_a",
-    "item2", "item2_box", "item2_rt", "item2_with_a", "sampled_with_a",
-    "rt"
+    "b_side", "sampled", "sampled_stim", "sampled_side", "unsampled",
+    "row_order", "a_box", "sampled_box", "sampled_box_rt",
+    "unsampled_box", "unsampled_box_rt",
+    "rt", "time_elapsed"
 ];
 
 function csvCell(v) {
@@ -825,6 +822,10 @@ function buildDataString() {
         .filter([{ task: "sample" }, { task: "sort" }])
         .values()
         .map(d => Object.assign({}, d, { trial_type: d.phase }));
+
+    // numbered over the rows actually emitted, so practice starts at 1 rather
+    // than going negative off the back of run_order 0
+    rows.forEach((d, i) => { d.con_trial_num = i + 1; });
 
     const lines = rows.map(d => OUT_COLUMNS.map(c => csvCell(d[c])).join(","));
     return [OUT_COLUMNS.join(",")].concat(lines).join("\n");
