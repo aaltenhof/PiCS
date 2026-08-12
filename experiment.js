@@ -55,6 +55,7 @@ var jsPsych = initJsPsych({
 
 var study_id = "PiCS";
 var participant_id = "";
+var participant_age = "";
 
 var today = new Date();
 var dd = String(today.getDate()).padStart(2, '0');
@@ -333,13 +334,23 @@ const id_screen = {
              <input type="text" id="participant_id" name="participant_id"
                     autocomplete="off" autocapitalize="characters"
                     spellcheck="false" required>
+           </div>
+           <div class="field">
+             <label for="participant_age">Age</label>
+             <input type="text" id="participant_age" name="participant_age"
+                    autocomplete="off" inputmode="decimal"
+                    spellcheck="false" required>
            </div>`,
     autofocus: "participant_id",
     button_label: "Continue",
     data: { task: "id_entry" },
     on_finish: function (data) {
-        participant_id = String(data.response.participant_id).trim();
-        jsPsych.data.addProperties({ participant_id: participant_id });
+        participant_id  = String(data.response.participant_id).trim();
+        participant_age = String(data.response.participant_age).trim();
+        jsPsych.data.addProperties({
+            participant_id: participant_id,
+            participant_age: participant_age
+        });
     }
 };
 
@@ -420,7 +431,7 @@ function trialData(t, task) {
         trial_id: t.trial_id,
         run_order: t.run_order,
         con_trial_num: (t.run_order - 1) * 2 + (task === "sample" ? 1 : 2),
-        trial_type: t.trial_type,
+        phase: t.trial_type,          // "practice" | "experimental"
         is_practice: t.trial_type === "practice",
         block_ID: t.block_ID,
         stim_type: t.stim_type,
@@ -788,12 +799,43 @@ function createVideoTrial(src, task) {
 
 const exit_video = createVideoTrial(EXIT_VIDEO, "exit_video");
 
+/* Explicit output columns. jsPsych's own bookkeeping (trial_index,
+   plugin_version, time_elapsed, preload results...) is dropped, and the
+   ordering mirrors trials.csv minus the audio filename columns. */
+const OUT_COLUMNS = [
+    "participant_id", "participant_age", "study_id", "session_date", "session_time",
+    "run_order", "con_trial_num", "task",
+    "trial_id", "trial_type", "block_ID", "stim_type",
+    "a_stim", "b_stim", "x_stim",
+    "matched", "matched_label", "unmatched_label", "heard_label",
+    "b_side", "sampled", "sampled_stim", "sampled_side",
+    "a_box", "item1", "item1_box", "item1_rt", "item1_with_a",
+    "item2", "item2_box", "item2_rt", "item2_with_a", "sampled_with_a",
+    "rt"
+];
+
+function csvCell(v) {
+    if (v === null || v === undefined) return "";
+    const str = String(v);
+    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+function buildDataString() {
+    const rows = jsPsych.data.get()
+        .filter([{ task: "sample" }, { task: "sort" }])
+        .values()
+        .map(d => Object.assign({}, d, { trial_type: d.phase }));
+
+    const lines = rows.map(d => OUT_COLUMNS.map(c => csvCell(d[c])).join(","));
+    return [OUT_COLUMNS.join(",")].concat(lines).join("\n");
+}
+
 const save_data = {
     type: jsPsychPipe,
     action: "save",
     experiment_id: DATAPIPE_ID,
     filename: () => `PiCS_${participant_id || "noID"}_${Date.now()}.csv`,
-    data_string: () => jsPsych.data.get().csv()
+    data_string: buildDataString
 };
 
 const save_node = {
@@ -809,8 +851,13 @@ const local_save_node = {
                    <p class="rsrch-note">Data was not uploaded. Download it instead.</p>`,
         choices: ["Download CSV"],
         button_html: c => `<button class="rsrch-btn rsrch-btn-go">${c}</button>`,
-        on_finish: () => jsPsych.data.get().localSave(
-            "csv", `PiCS_${participant_id || "noID"}_${Date.now()}.csv`)
+        on_finish: () => {
+            const blob = new Blob([buildDataString()], { type: "text/csv" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `PiCS_${participant_id || "noID"}_${Date.now()}.csv`;
+            a.click();
+        }
     }],
     conditional_function: () => DATAPIPE_ID === null
 };
