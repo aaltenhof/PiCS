@@ -834,7 +834,7 @@ const save_data = {
     type: jsPsychPipe,
     action: "save",
     experiment_id: DATAPIPE_ID,
-    filename: () => `PiCS_${participant_id || "noID"}_${Date.now()}.csv`,
+    filename: () => `${participant_id || "noID"}.csv`,
     data_string: buildDataString
 };
 
@@ -855,7 +855,7 @@ const local_save_node = {
             const blob = new Blob([buildDataString()], { type: "text/csv" });
             const a = document.createElement("a");
             a.href = URL.createObjectURL(blob);
-            a.download = `PiCS_${participant_id || "noID"}_${Date.now()}.csv`;
+            a.download = `${participant_id || "noID"}.csv`;
             a.click();
         }
     }],
