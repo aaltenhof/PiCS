@@ -210,15 +210,22 @@ function stimImg(t, file, cls = "") {
 }
 
 const AUDIO_CACHE = new Map();
+const FETCH_TIMEOUT_MS = 8000;   // a stalled request must never park a trial
 
 async function loadBuffer(src) {
     if (AUDIO_CACHE.has(src)) return AUDIO_CACHE.get(src);
-    const ctx = jsPsych.pluginAPI.audioContext();
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const buf = await ctx.decodeAudioData(await res.arrayBuffer());
-    AUDIO_CACHE.set(src, buf);
-    return buf;
+    const ctx  = jsPsych.pluginAPI.audioContext();
+    const ctrl = new AbortController();
+    const bail = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+        const res = await fetch(src, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const buf = await ctx.decodeAudioData(await res.arrayBuffer());
+        AUDIO_CACHE.set(src, buf);
+        return buf;
+    } finally {
+        clearTimeout(bail);
+    }
 }
 
 /* Web Audio rather than <audio>: sample-accurate, and the gain ramps put a
@@ -243,14 +250,42 @@ function stopAudio() {
     if (resolve) resolve(false);
 }
 
+/* iOS puts the AudioContext into "interrupted" (or "suspended") after video
+   playback, Siri, a notification, or a screen lock, and it does not recover on
+   its own. While it's out, ctx.currentTime stops advancing, so a scheduled clip
+   never fires onended and every await below it stalls forever. Any touch is a
+   user gesture, so spend every one of them on a resume. */
+let AUDIO_WATCHDOG_WIRED = false;
+
+function wireAudioWatchdog() {
+    if (AUDIO_WATCHDOG_WIRED) return;
+    const ctx = jsPsych.pluginAPI.audioContext();
+    if (!ctx) return;
+    AUDIO_WATCHDOG_WIRED = true;
+    const kick = () => { if (ctx.state !== "running") ctx.resume().catch(() => {}); };
+    if (ctx.addEventListener) {
+        ctx.addEventListener("statechange", () => {
+            console.warn("PiCS audio context →", ctx.state);
+            kick();
+        });
+    }
+    document.addEventListener("pointerdown", kick, true);
+    document.addEventListener("touchstart",  kick, true);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) kick(); });
+}
+
 /* opts.cueAt / opts.onCue fire a callback partway through the clip, so a
    visual can be timed to a word rather than to the end of the file. */
 async function playAudio(src, opts = {}) {
     const ctx = jsPsych.pluginAPI.audioContext();
     if (!ctx) return playAudioFallback(src);
+    wireAudioWatchdog();
     stopAudio();
     try {
-        if (ctx.state !== "running") await ctx.resume();
+        // resume() itself can hang on an interrupted iOS context
+        if (ctx.state !== "running") {
+            await Promise.race([ctx.resume().catch(() => {}), pause(400)]);
+        }
         const buf = await loadBuffer(src);
 
         // a second call may have landed while this one was decoding
@@ -281,11 +316,23 @@ async function playAudio(src, opts = {}) {
         }
 
         return new Promise(resolve => {
-            CURRENT_AUDIO = { source, gain, ctx, resolve };
-            source.onended = () => {
+            let done = false;
+            const finish = ok => {
+                if (done) return;
+                done = true;
+                clearTimeout(guard);
                 if (CURRENT_AUDIO && CURRENT_AUDIO.source === source) CURRENT_AUDIO = null;
-                resolve(true);
+                resolve(ok);
             };
+            // if onended never arrives, move on anyway rather than sit dead
+            const guard = setTimeout(() => {
+                console.warn(`PiCS audio TIMED OUT — ${src}`);
+                try { source.onended = null; source.stop(); } catch (e) { /* gone */ }
+                if (ctx.state !== "running") ctx.resume().catch(() => {});
+                finish(false);
+            }, (d + 1.5) * 1000);
+            CURRENT_AUDIO = { source, gain, ctx, resolve: () => finish(false) };
+            source.onended = () => finish(true);
         });
     } catch (e) {
         console.warn(`PiCS audio FAILED — ${src} — ${e.message}`);
@@ -310,6 +357,128 @@ function playAudioFallback(src) {
 
 function pause(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+
+/* ==========================================================================
+   Preloading
+
+   Two caches are in play. jsPsychPreload warms the *browser* cache, which is
+   what <img> and <video> read from — that half works. But playAudio goes
+   through loadBuffer, which reads AUDIO_CACHE, a separate map jsPsychPreload
+   never touches. So audio has to be warmed here or every clip is a live fetch
+   with a child waiting on it.
+   ========================================================================== */
+
+// single source of truth: both the jsPsychPreload node and warmAudio use these
+function audioManifest(runList) {
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST,
+                   SORT_ITEM1, SORT_ITEM2, PRAC_INTRO, PRAC_SAMPLE].concat(SORT_END);
+    const perTrial = runList.flatMap(t => [
+        labelSrc(t.matched_label,   t.a_audio),
+        labelSrc(t.matched_label,   t.matched_audio),
+        labelSrc(t.matched_label,   t.matched_audio_also),
+        labelSrc(t.unmatched_label, t.unmatched_audio),
+        labelSrc(t.unmatched_label, t.unmatched_audio_called)
+    ]);
+    return [...new Set(fixed.concat(perTrial).filter(Boolean))];
+}
+
+function imageManifest(runList) {
+    const prac = [PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
+        .map(f => PRAC_STIM + f);
+    const exp = runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)));
+    return [...new Set([BOX_IMG, ZIB_IMG].concat(prac).concat(exp).filter(Boolean))];
+}
+
+/* Decodes every clip into AUDIO_CACHE up front. Failures are collected, never
+   thrown — one bad filename shouldn't kill a session that's otherwise fine,
+   and the researcher sees the list before a child is in the room. */
+async function warmAudio(paths, onProgress, concurrency = 6) {
+    const queue  = paths.slice();
+    const failed = [];
+    let done = 0;
+
+    const worker = async () => {
+        while (queue.length) {
+            const src = queue.shift();
+            try {
+                await loadBuffer(src);
+            } catch (e) {
+                const why = e.name === "AbortError" ? "timed out" : (e.message || e);
+                failed.push(`${src} — ${why}`);
+            }
+            if (onProgress) onProgress(++done, paths.length);
+        }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, worker));
+    if (failed.length) console.warn("PiCS audio preload failures:\n" + failed.join("\n"));
+    return failed;
+}
+
+/* Runs after the ID screen, so the researcher's tap has already given the
+   AudioContext a user gesture to resume on, and before the intro video, so
+   nothing loads while the child is watching. */
+function createWarmupTrial(runList) {
+    const paths = audioManifest(runList);
+
+    return {
+        type: jsPsychHtmlButtonResponse,
+        css_classes: ["researcher"],
+        choices: [],
+        stimulus: `
+          <div class="rsrch-kicker">Loading audio</div>
+          <h1 class="rsrch-title">PiCS</h1>
+          <div style="width:min(420px,70vw);height:10px;border-radius:5px;
+                      background:rgba(0,0,0,.12);overflow:hidden;margin:18px auto 10px">
+            <div id="warm-bar" style="width:0%;height:100%;background:#3aa76d;
+                                      transition:width 120ms linear"></div>
+          </div>
+          <p class="rsrch-note" id="warm-count">0 / ${paths.length}</p>
+          <div id="warm-fail" style="display:none;max-width:min(640px,86vw);margin:18px auto 0;
+                                     text-align:left;font-size:13px;line-height:1.5;
+                                     color:#a33;max-height:34vh;overflow:auto"></div>
+          <button id="warm-go" class="rsrch-btn rsrch-btn-go hidden"
+                  style="display:none;margin-top:18px">Continue anyway</button>`,
+        data: { task: "audio_warmup" },
+        on_load: async function () {
+            wireAudioWatchdog();
+            const ctx = jsPsych.pluginAPI.audioContext();
+            if (ctx && ctx.state !== "running") await Promise.race([ctx.resume().catch(() => {}), pause(400)]);
+
+            const bar   = document.getElementById("warm-bar");
+            const count = document.getElementById("warm-count");
+            const t0    = performance.now();
+
+            const failed = await warmAudio(paths, (done, total) => {
+                bar.style.width = Math.round((done / total) * 100) + "%";
+                count.textContent = `${done} / ${total}`;
+            });
+
+            const finish = () => jsPsych.finishTrial({
+                task: "audio_warmup",
+                rt: Math.round(performance.now() - t0),
+                audio_files: paths.length,
+                audio_cached: AUDIO_CACHE.size,
+                audio_failed: failed.length,
+                audio_failed_list: failed.join(" | ")
+            });
+
+            if (!failed.length) { finish(); return; }
+
+            // something's missing or misnamed — stop here rather than find out mid-trial
+            const box = document.getElementById("warm-fail");
+            const go  = document.getElementById("warm-go");
+            count.textContent = `${paths.length - failed.length} / ${paths.length} loaded`;
+            box.innerHTML = `<strong>${failed.length} file(s) failed:</strong><br>` +
+                            failed.map(f => f.replace(/&/g, "&amp;").replace(/</g, "&lt;")).join("<br>");
+            box.style.display = "block";
+            go.style.display  = "inline-block";
+            go.classList.remove("hidden");
+            go.addEventListener("click", finish, { once: true });
+        }
+    };
 }
 
 function showFatal(err) {
@@ -421,7 +590,8 @@ const intro_video = {
     }
 };
 
-const intake = { timeline: [id_screen, intro_video] };
+// intake is assembled in the runner now — the audio warm-up sits between the
+// ID screen and the intro video, and it needs the run list to know what to load.
 
 
 function trialData(t, task) {
@@ -891,28 +1061,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         user_agent: navigator.userAgent
     });
 
+    // images and video only — audio is warmed into AUDIO_CACHE by the warm-up
+    // node instead, since jsPsychPreload fills a cache playAudio never reads
     const preload = {
         type: jsPsychPreload,
         video: [INTRO_VIDEO, EXIT_VIDEO, HALFWAY_VIDEO],
-        images: [BOX_IMG, ZIB_IMG]
-            .concat([PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
-                .map(f => PRAC_STIM + f))
-            .concat(runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)))),
-        audio: [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST, SORT_ITEM1, SORT_ITEM2,
-                PRAC_INTRO, PRAC_SAMPLE]
-            .concat(SORT_END)
-            .concat(runList.flatMap(t => [
-            labelSrc(t.matched_label, t.a_audio),
-            labelSrc(t.matched_label, t.matched_audio),
-            labelSrc(t.matched_label, t.matched_audio_also),
-            labelSrc(t.unmatched_label, t.unmatched_audio),
-            labelSrc(t.unmatched_label, t.unmatched_audio_called)
-            ])),
+        images: imageManifest(runList),
         continue_after_error: true,
         show_detailed_errors: true
     };
 
-    const timeline = [preload, intake];
+    const timeline = [preload, id_screen, createWarmupTrial(runList), intro_video];
 
     // hand-coded practice: no labels, keeps the full first-trial sort framing
     const practice = Object.assign({}, PRAC_TRIAL, { run_order: 0, matched: null, b_side: "left" });
