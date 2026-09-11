@@ -696,8 +696,9 @@ function createSortTrial(t, isFirst, isLast) {
     // top-row positions and A's box are decided fresh each trial
     const rowOrder  = shuffle(["A", "B", "X"]);
     const aBox      = Math.floor(Math.random() * N_BOXES);
-    // first trial gets its own opener; the last hands off to the exit video
-    const zibAudio  = isFirst ? SORT_FIRST : SORT_ZIB;
+    // opener only on the practice and first sort trial; the last hands off to
+    // the exit video
+    const zibAudio  = isFirst ? SORT_FIRST : null;
     const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
 
     const isPractice = t.trial_type === "practice";
@@ -832,6 +833,7 @@ function createSortTrial(t, isFirst, isLast) {
             const startAFlight = () => { if (!aFlight) aFlight = place("A", aBox); };
 
             const playOpener = async () => {
+                if (!zibAudio) return;
                 const cueAt = PUT_CUE_AT.get(zibAudio);
                 const ok = await playAudio(zibAudio, { cueAt: cueAt, onCue: startAFlight });
                 if (!ok && zibAudio !== SORT_ZIB) {
@@ -880,7 +882,7 @@ function createSortTrial(t, isFirst, isLast) {
                 await playAudio(sampledCalled);
                 await pause(300);
             }
-            await playAudio(SORT_ITEM1);
+            if (isFirst) await playAudio(SORT_ITEM1);
             const r1 = await awaitBox();
             await place(firstUp, r1.box);
             await pause(400);
