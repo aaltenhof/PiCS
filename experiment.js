@@ -19,12 +19,15 @@ const SELECT_HOLD_MS = 2500;   // how long the filled box sits before moving on
 const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
 const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
-const PRAC_SELECT   = PRACTICE_DIR + "practice_select.wav";   // placeholder until practice is rebuilt
+const PRAC_SEL_DIR  = PRACTICE_DIR + "selection/";
+const PRAC_SEL_INST = PRAC_SEL_DIR + "instructions.wav";
+const PRAC_SELECT   = set => `${PRAC_SEL_DIR}select_${set}.wav`;
 const PRAC_STIM     = "selected_stim/practice/";
 const PRAC_TRIAL    = {
     trial_id: "practice",
     trial_type: "practice",
     stim_type: "practice",
+    prac_set: "dogs",
     a_stim: "corgi.png",
     b_stim: "pom.png",
     x_stim: "golden.png"
@@ -182,13 +185,13 @@ function buildRunList(bank) {
 
 
 function triadDir(t) {
-    if (t.trial_type === "practice") return PRAC_STIM;
+    if (t.trial_type === "practice") return t.prac_set ? `${PRAC_STIM}${t.prac_set}/` : PRAC_STIM;
     const n = String(t.trial_id).replace(/\D/g, "") || "1";
     return `${STIM_DIR}${t.stim_type}/triad${n}/`;
 }
 
 function stimSrc(t, file) {
-    return t.trial_type === "practice" ? PRAC_STIM + file : triadDir(t) + file;
+    return triadDir(t) + file;
 }
 
 function labelSrc(label, file) { return `${LABEL_AUDIO}${label}/${file}`; }
@@ -361,8 +364,8 @@ function pause(ms) {
 
 // single source of truth: both the jsPsychPreload node and warmAudio use these
 function audioManifest(runList) {
-    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_SELECT]
-        .concat(SELECT_END);
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE,
+                   PRAC_SEL_INST, PRAC_SELECT(PRAC_TRIAL.prac_set)].concat(SELECT_END);
     const perTrial = runList.flatMap(t => [
         labelSrc(t.matched_label,   t.a_audio),
         labelSrc(t.matched_label,   t.matched_audio),
@@ -376,7 +379,7 @@ function audioManifest(runList) {
 
 function imageManifest(runList) {
     const prac = [PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
-        .map(f => PRAC_STIM + f);
+        .map(f => stimSrc(PRAC_TRIAL, f));
     const exp = runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)));
     return [...new Set([BOX_IMG].concat(prac).concat(exp).filter(Boolean))];
 }
@@ -743,12 +746,68 @@ function flyToBox(items, boxItems) {
     });
 }
 
-function createSelectTrial(t, isLast) {
+/* Selection-screen styles live here rather than in index.html so the layout
+   can't silently go missing. Colours come from the same --go variables as
+   the other green buttons. */
+const SELECT_CSS = `
+  .select-stage { position: fixed; inset: 0; }
+  .select-stage .sel-row {
+    position: absolute; left: 0; right: 0; top: 40%;
+    transform: translateY(-50%);
+    display: flex; justify-content: center; align-items: center; gap: 5vw;
+  }
+  .select-stage .sel-item {
+    border: 6px solid transparent; border-radius: 22px; padding: 10px;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: border-color .15s, opacity .4s, filter .4s;
+  }
+  .select-stage .sel-item.picked   { border-color: var(--go, #3aa76d); }
+  .select-stage .sel-item.unpicked { opacity: .35; filter: grayscale(1); }
+
+  .select-stage .sel-box {
+    position: absolute; left: 3vw; bottom: 3vh;
+    width: 190px; margin: 0; padding: 0;
+  }
+  .select-stage .sel-box .box-img { width: 100%; height: auto; display: block; }
+  .select-stage .sel-box .box-items {
+    position: absolute; left: 0; right: 0; top: auto; bottom: 50%;
+    display: flex; justify-content: center; align-items: flex-end;
+  }
+  .select-stage .sel-box .box-chip { width: 88px; height: 88px; }
+  .select-stage .sel-box .box-chip + .box-chip { margin-left: -36px; }
+
+  .select-stage .done-btn {
+    position: absolute; right: 3vw; bottom: 4vh;
+    min-width: 200px; min-height: 90px; padding: 0 40px;
+    font: inherit; font-size: 28px; font-weight: 700; letter-spacing: -0.01em;
+    color: #fff; background: var(--go, #3aa76d);
+    border: none; border-radius: 999px;
+    box-shadow: 0 8px 0 var(--go-deep, #2b7d51), 0 14px 32px var(--go-glow, rgba(58,167,109,.35));
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    transition: opacity .3s;
+  }
+  .select-stage .done-btn:active {
+    transform: translateY(4px);
+    box-shadow: 0 4px 0 var(--go-deep, #2b7d51), 0 8px 20px var(--go-glow, rgba(58,167,109,.35));
+  }
+  .select-stage .done-btn:disabled    { opacity: .35; box-shadow: none; }
+  .select-stage .done-btn.done-hidden { opacity: 0; pointer-events: none; }
+`;
+
+function injectSelectCss() {
+    if (document.getElementById("select-css")) return;
+    const el = document.createElement("style");
+    el.id = "select-css";
+    el.textContent = SELECT_CSS;
+    document.head.appendChild(el);
+}
+
+function createSelectTrial(t, isLast, withInstructions = false) {
     // row positions are decided fresh each trial, independent of the sample
     const rowOrder   = shuffle(["A", "B", "X"]);
     const stimOf     = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
     const isPractice = t.trial_type === "practice";
-    const prompt     = isPractice ? PRAC_SELECT : SELECT_AUDIO(t.matched_label);
+    const prompt     = isPractice ? PRAC_SELECT(t.prac_set) : SELECT_AUDIO(t.matched_label);
     // the last trial hands off to the exit video
     const endAudio   = isLast ? null : SELECT_END[Math.floor(Math.random() * SELECT_END.length)];
 
@@ -761,7 +820,7 @@ function createSelectTrial(t, isLast) {
         choices: [],
         stimulus: `
           <div class="select-stage">
-            <div class="box sel-box">
+            <div class="sel-box">
               <img class="box-img" src="${BOX_IMG}" alt="">
               <div class="box-items" id="box-items-0"></div>
             </div>
@@ -778,6 +837,10 @@ function createSelectTrial(t, isLast) {
 
             // objects are on screen but locked until the prompt finishes
             await pause(400);
+            if (withInstructions) {
+                await playAudio(PRAC_SEL_INST);
+                await pause(300);
+            }
             await playAudio(prompt);
 
             const t0 = performance.now();
@@ -955,6 +1018,8 @@ const end_screen = {
 
 document.addEventListener('DOMContentLoaded', async () => {
 
+    injectSelectCss();
+
     let bank;
     try {
         bank = await loadTrials(TRIAL_FILE);
@@ -986,7 +1051,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // hand-coded practice: no labels
     const practice = Object.assign({}, PRAC_TRIAL, { run_order: 0, matched: null, b_side: "left" });
     timeline.push(createSampleTrial(practice));
-    timeline.push(createSelectTrial(practice, false));
+    timeline.push(createSelectTrial(practice, false, true));
 
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
