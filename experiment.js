@@ -11,24 +11,15 @@ const SUPPORT_AUDIO = "audio/sample/support/";
 const CUE_PICK_ONE  = SUPPORT_AUDIO + "pick_one.wav";
 const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 
-const SORT_DIR      = "audio/sort/";
-const SORT_ZIB      = SORT_DIR + "instructions/zib/zib_choice_1.wav";
-const SORT_FIRST    = SORT_DIR + "instructions/zib/first_trial.wav";
-const SORT_ITEM1    = SORT_DIR + "instructions/item1/your_turn.wav";
-const SORT_ITEM2    = SORT_DIR + "instructions/item2/next_one.wav";
-const SORT_END      = [1, 2, 3].map(n => `${SORT_DIR}end/to_sample${n}.wav`);
-
-// Seconds into each opener at which the word "put" lands. The object starts
-// flying to the box at that moment instead of waiting for the clip to finish.
-// null = wait for the audio to end (the old behaviour).
-const PUT_CUE_AT = new Map([
-    [SORT_ZIB,   1.82],
-    [SORT_FIRST, null]   // no "put" in this one — place after it finishes
-]);
+// "Can you pick all the sibus?" — always the target's (matched) label
+const SELECT_AUDIO   = label => `${LABEL_AUDIO}${label}/select_${label}.wav`;
+const SELECT_END     = [1, 2, 3].map(n => `audio/sort/end/to_sample${n}.wav`);
+const SELECT_HOLD_MS = 2500;   // how long the filled box sits before moving on
 
 const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
 const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
+const PRAC_SELECT   = PRACTICE_DIR + "practice_select.wav";   // placeholder until practice is rebuilt
 const PRAC_STIM     = "selected_stim/practice/";
 const PRAC_TRIAL    = {
     trial_id: "practice",
@@ -40,10 +31,8 @@ const PRAC_TRIAL    = {
 };
 
 const BOX_IMG       = "selected_stim/box_open.png";
-const ZIB_IMG       = "selected_stim/zib.png";
-const N_BOXES       = 2;
 
-const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and sort together
+const SHUFFLE_TRIALS   = true;   // shuffle experimental trials, but keep sample and select together
 const AVOID_CAT_RUN    = true;   // no two consecutive trials from the same stim_type
 const RANDOMIZE_MATCH  = true;   // balanced matched/unmatched assignment of the label
 const MAX_MATCHED_RUN  = 2;      // cap consecutive matched (or unmatched) trials
@@ -372,14 +361,15 @@ function pause(ms) {
 
 // single source of truth: both the jsPsychPreload node and warmAudio use these
 function audioManifest(runList) {
-    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, SORT_ZIB, SORT_FIRST,
-                   SORT_ITEM1, SORT_ITEM2, PRAC_INTRO, PRAC_SAMPLE].concat(SORT_END);
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_SELECT]
+        .concat(SELECT_END);
     const perTrial = runList.flatMap(t => [
         labelSrc(t.matched_label,   t.a_audio),
         labelSrc(t.matched_label,   t.matched_audio),
         labelSrc(t.matched_label,   t.matched_audio_also),
         labelSrc(t.unmatched_label, t.unmatched_audio),
-        labelSrc(t.unmatched_label, t.unmatched_audio_called)
+        labelSrc(t.unmatched_label, t.unmatched_audio_called),
+        SELECT_AUDIO(t.matched_label)
     ]);
     return [...new Set(fixed.concat(perTrial).filter(Boolean))];
 }
@@ -388,7 +378,7 @@ function imageManifest(runList) {
     const prac = [PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
         .map(f => PRAC_STIM + f);
     const exp = runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)));
-    return [...new Set([BOX_IMG, ZIB_IMG].concat(prac).concat(exp).filter(Boolean))];
+    return [...new Set([BOX_IMG].concat(prac).concat(exp).filter(Boolean))];
 }
 
 /* Decodes every clip into AUDIO_CACHE up front. Failures are collected, never
@@ -659,7 +649,7 @@ function createSampleTrial(t) {
                 const sampledStim   = isLeft ? leftStim : rightStim;
                 const unsampled     = sampled === "B" ? "X" : "B";
                 const unsampledStim = isLeft ? rightStim : leftStim;
-                // practice has no labels, so it goes straight to the sort cue
+                // practice has no labels, so it goes straight to the next cue
                 const isPractice  = t.trial_type === "practice";
                 const heardLabel  = isPractice ? null : (t.matched ? t.matched_label : t.unmatched_label);
                 const heardFile   = isPractice ? null : (t.matched ? t.matched_audio : t.unmatched_audio);
@@ -692,226 +682,145 @@ function createSampleTrial(t) {
     };
 }
 
-function createSortTrial(t, isFirst, isLast) {
-    // top-row positions and A's box are decided fresh each trial
-    const rowOrder  = shuffle(["A", "B", "X"]);
-    const aBox      = Math.floor(Math.random() * N_BOXES);
-    // opener only on the practice and first sort trial; the last hands off to
-    // the exit video
-    const zibAudio  = isFirst ? SORT_FIRST : null;
-    const endAudio  = isLast ? null : SORT_END[Math.floor(Math.random() * SORT_END.length)];
+/* Measure where each object is, measure where it's going, then fly a clone
+   between the two so the child sees it travel into the box rather than vanish
+   and reappear. Every chip is placed before any is measured, so objects
+   flying together don't aim at a box that reflows under them. */
+function flyToBox(items, boxItems) {
+    if (!items.length) return Promise.resolve();
 
+    const legs = items.map(item => {
+        const source = item.querySelector("img, .stim-missing");
+        return { item, source, from: source.getBoundingClientRect() };
+    });
+
+    // put the chips in place but invisible, so we can measure their targets
+    legs.forEach(l => {
+        l.chip = l.source.cloneNode(true);
+        l.chip.classList.add("box-chip");
+        l.chip.style.visibility = "hidden";
+        l.chip.style.animation = "none";
+        boxItems.appendChild(l.chip);
+    });
+
+    legs.forEach(l => {
+        const to = l.chip.getBoundingClientRect();
+        l.item.style.visibility = "hidden";
+
+        const flier = l.source.cloneNode(true);
+        flier.className = "flier";
+        flier.style.left   = l.from.left + "px";
+        flier.style.top    = l.from.top + "px";
+        flier.style.width  = l.from.width + "px";
+        flier.style.height = l.from.height + "px";
+        document.body.appendChild(flier);
+        l.flier = flier;
+
+        l.dx = (to.left + to.width / 2) - (l.from.left + l.from.width / 2);
+        l.dy = (to.top + to.height / 2) - (l.from.top + l.from.height / 2);
+        l.scale = to.width / l.from.width;
+    });
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        legs.forEach(l => {
+            l.flier.style.transform = `translate(${l.dx}px, ${l.dy}px) scale(${l.scale})`;
+        });
+    }));
+
+    return new Promise(resolve => {
+        setTimeout(() => {
+            // reveal the chip first, drop the flier a frame later, and never
+            // restore pop-in — re-enabling it would replay the entrance
+            // animation and read as a flicker
+            legs.forEach(l => { l.chip.style.visibility = ""; });
+            requestAnimationFrame(() => legs.forEach(l => l.flier.remove()));
+            // the originals stay hidden for good. Restoring visibility here
+            // would let .placed fade them from opacity 1 to 0 in the row,
+            // which reads as the object blinking back into place.
+            legs.forEach(l => l.item.classList.add("placed"));
+            resolve();
+        }, 1300);
+    });
+}
+
+function createSelectTrial(t, isLast) {
+    // row positions are decided fresh each trial, independent of the sample
+    const rowOrder   = shuffle(["A", "B", "X"]);
+    const stimOf     = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
     const isPractice = t.trial_type === "practice";
-    // A is always the matched label, so its "it's called" clip is a_audio
-    const aCalled   = isPractice ? null : labelSrc(t.matched_label, t.a_audio);
-
-    const stimOf = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
+    const prompt     = isPractice ? PRAC_SELECT : SELECT_AUDIO(t.matched_label);
+    // the last trial hands off to the exit video
+    const endAudio   = isLast ? null : SELECT_END[Math.floor(Math.random() * SELECT_END.length)];
 
     const items = rowOrder.map(k =>
-        `<div class="sort-item" id="item-${k}">${stimImg(t, stimOf[k])}</div>`).join("");
-
-
-    const boxes = Array.from({ length: N_BOXES }, (_, i) =>
-        `<button class="box" id="box-${i}">
-           <img class="box-img" src="${BOX_IMG}" alt="">
-           <div class="box-items" id="box-items-${i}"></div>
-         </button>`).join("");
+        `<div class="sort-item sel-item" id="item-${k}">${stimImg(t, stimOf[k])}</div>`).join("");
 
     return {
         type: jsPsychHtmlButtonResponse,
         css_classes: ["child"],
         choices: [],
         stimulus: `
-          <div class="sort-stage">
-            <div class="item-row" id="item-row">${items}</div>
-            <div class="box-row" id="box-row">${boxes}</div>
-            <img class="zib" id="zib" src="${ZIB_IMG}" alt="">
+          <div class="select-stage">
+            <div class="box sel-box">
+              <img class="box-img" src="${BOX_IMG}" alt="">
+              <div class="box-items" id="box-items-0"></div>
+            </div>
+            <div class="item-row sel-row" id="item-row">${items}</div>
+            <button class="done-btn" id="done-btn" disabled>Done</button>
           </div>`,
-        data: trialData(t, "sort"),
+        data: trialData(t, "select"),
         on_load: async function () {
-            const boxRow  = document.getElementById("box-row");
             const itemRow = document.getElementById("item-row");
-            const boxEls  = Array.from({ length: N_BOXES }, (_, i) => document.getElementById("box-" + i));
+            const done    = document.getElementById("done-btn");
+            const picks   = [];   // in tap order
+            const pickRts = [];
+            let open = false;
 
-            const highlight = key => {
-                itemRow.querySelectorAll(".sort-item")
-                    .forEach(el => el.classList.remove("highlighted"));
-                itemRow.classList.toggle("has-highlight", !!key);
-                if (key) document.getElementById("item-" + key).classList.add("highlighted");
-            };
+            // objects are on screen but locked until the prompt finishes
+            await pause(400);
+            await playAudio(prompt);
 
-            // which object did the child just sample, and what was it called?
-            const sampleRow = jsPsych.data.get()
-                .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
-            const firstUp  = sampleRow.sampled === "X" ? "X" : "B";   // sampled goes first
-            const secondUp = firstUp === "B" ? "X" : "B";
-            const sampledCalled = isPractice ? null : (t.matched
-                ? labelSrc(t.matched_label, t.a_audio)
-                : labelSrc(t.unmatched_label, t.unmatched_audio_called));
-            const sampledLabel = isPractice ? null : (t.matched ? t.matched_label : t.unmatched_label);
+            const t0 = performance.now();
+            open = true;
+            itemRow.classList.add("active");
+            done.disabled = false;
 
-            const lockBoxes = on => {
-                boxEls.forEach(el => { el.disabled = !on; });
-                boxRow.classList.toggle("active", on);
-            };
-            lockBoxes(false);
-
-            /* Measure where the object is, measure where it's going, then fly a
-               clone between the two so the child sees it travel into the box
-               rather than vanish and reappear. */
-            const place = (key, boxIdx) => new Promise(resolve => {
-                const item   = document.getElementById("item-" + key);
-                const source = item.querySelector("img, .stim-missing");
-                const from   = source.getBoundingClientRect();
-
-                // put the chip in place but invisible, so we can measure its target
-                const chip = source.cloneNode(true);
-                chip.classList.add("box-chip");
-                chip.style.visibility = "hidden";
-                chip.style.animation = "none";
-                document.getElementById("box-items-" + boxIdx).appendChild(chip);
-                const to = chip.getBoundingClientRect();
-
-                item.classList.remove("highlighted");
-                itemRow.classList.remove("has-highlight");
-                item.style.visibility = "hidden";
-
-                const flier = source.cloneNode(true);
-                flier.className = "flier";
-                flier.style.left   = from.left + "px";
-                flier.style.top    = from.top + "px";
-                flier.style.width  = from.width + "px";
-                flier.style.height = from.height + "px";
-                document.body.appendChild(flier);
-
-                const dx = (to.left + to.width / 2) - (from.left + from.width / 2);
-                const dy = (to.top + to.height / 2) - (from.top + from.height / 2);
-                const scale = to.width / from.width;
-
-                requestAnimationFrame(() => requestAnimationFrame(() => {
-                    flier.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
-                }));
-
-                setTimeout(() => {
-                    // reveal the chip first, drop the flier a frame later, and
-                    // never restore pop-in — re-enabling it would replay the
-                    // entrance animation and read as a flicker
-                    chip.style.visibility = "";
-                    requestAnimationFrame(() => flier.remove());
-                    // the original stays hidden for good. Restoring visibility
-                    // here would let .placed fade it from opacity 1 to 0 in the
-                    // row, which reads as the object blinking back into place.
-                    item.classList.add("placed");
-                    resolve();
-                }, 1300);
+            // one tap selects and locks; there is no way to unselect
+            rowOrder.forEach(k => {
+                const el = document.getElementById("item-" + k);
+                el.addEventListener("click", () => {
+                    if (!open) return;
+                    picks.push(k);
+                    pickRts.push(Math.round(performance.now() - t0));
+                    el.classList.add("picked");
+                }, { once: true });
             });
 
-            // only ever called after the prompt audio has finished
-            const awaitBox = () => new Promise(resolve => {
-                const t0 = performance.now();
-                lockBoxes(true);
-                const handlers = [];
-                boxEls.forEach((el, i) => {
-                    const h = () => {
-                        lockBoxes(false);
-                        boxEls.forEach((e, j) => e.removeEventListener("click", handlers[j]));
-                        resolve({ box: i, rt: Math.round(performance.now() - t0) });
-                    };
-                    handlers.push(h);
-                    el.addEventListener("click", h);
-                });
-            });
+            await new Promise(resolve => done.addEventListener("click", resolve, { once: true }));
+            const rt = Math.round(performance.now() - t0);
+            open = false;
+            done.disabled = true;
+            done.classList.add("done-hidden");
+            itemRow.classList.remove("active");
 
-            // A is lit throughout. Normally: name it, then say where Zib puts it.
-            // On the first trial the opener explains the task, so it has to come
-            // before the label — otherwise the child hears "it's a wiso" cold.
-            highlight("A");
+            rowOrder.filter(k => !picks.includes(k))
+                .forEach(k => document.getElementById("item-" + k).classList.add("unpicked"));
             await pause(400);
 
-            // A starts moving on the word "put", if we know where that is
-            let aFlight = null;
-            const startAFlight = () => { if (!aFlight) aFlight = place("A", aBox); };
+            await flyToBox(picks.map(k => document.getElementById("item-" + k)),
+                           document.getElementById("box-items-0"));
 
-            const playOpener = async () => {
-                if (!zibAudio) return;
-                const cueAt = PUT_CUE_AT.get(zibAudio);
-                const ok = await playAudio(zibAudio, { cueAt: cueAt, onCue: startAFlight });
-                if (!ok && zibAudio !== SORT_ZIB) {
-                    await playAudio(SORT_ZIB, {
-                        cueAt: PUT_CUE_AT.get(SORT_ZIB), onCue: startAFlight
-                    });
-                }
-            };
-            const playLabel = async () => {
-                if (!aCalled) return;
-                await playAudio(aCalled);
-                await pause(300);
-            };
-
-            if (isFirst) {
-                await playOpener();
-                await pause(300);
-                await playLabel();
-            } else {
-                await playLabel();
-                await playOpener();
-            }
-
-            // if no cue time is set (or the audio failed), fall back to placing
-            // A after the opener finishes
-            if (!aFlight) {
-                await pause(600);
-                startAFlight();
-            }
-            await aFlight;
-            await pause(800);
-
-            // Zib has done his turn — he steps aside for the child
-            const zib = document.getElementById("zib");
-            if (zib) {
-                zib.classList.add("gone");
-                await pause(500);
-                zib.remove();
-            }
-
-            // sampled object first, and it's the only one that gets re-labelled
-            // same shape: name it, then prompt for the box
-            highlight(firstUp);
-            await pause(400);
-            if (sampledCalled) {
-                await playAudio(sampledCalled);
-                await pause(300);
-            }
-            if (isFirst) await playAudio(SORT_ITEM1);
-            const r1 = await awaitBox();
-            await place(firstUp, r1.box);
-            await pause(400);
-
-            highlight(secondUp);
-            await pause(400);
-            await playAudio(SORT_ITEM2);
-            const r2 = await awaitBox();
-            await place(secondUp, r2.box);
-            await pause(400);
-
+            await pause(SELECT_HOLD_MS);
             if (endAudio) await playAudio(endAudio);
 
             jsPsych.finishTrial({
-                rt: r1.rt + r2.rt,
+                rt: rt,
                 row_order: rowOrder.join(""),
-                a_box: aBox,
-                a_called_audio: aCalled,
-                sampled_label: sampledLabel,
-                sampled_called_audio: sampledCalled,
-                sampled: firstUp,
-                sampled_stim: stimOf[firstUp],
-                sampled_box: r1.box,
-                sampled_box_rt: r1.rt,
-                unsampled: secondUp,
-                unsampled_stim: stimOf[secondUp],
-                unsampled_box: r2.box,
-                unsampled_box_rt: r2.rt,
-                zib_audio: zibAudio,
+                prompt_audio: prompt,
+                selected: ["A", "B", "X"].filter(k => picks.includes(k)).join(""),
+                n_selected: picks.length,
+                click_order: picks.join(""),
+                click_rts: pickRts.join(" "),
                 end_audio: endAudio
             });
         }
@@ -978,8 +887,7 @@ const OUT_COLUMNS = [
     "a_stim", "b_stim", "x_stim",
     "matched", "matched_label", "unmatched_label", "heard_label",
     "b_side", "sampled", "sampled_stim", "sampled_side", "unsampled",
-    "row_order", "a_box", "sampled_box", "sampled_box_rt",
-    "unsampled_box", "unsampled_box_rt",
+    "row_order", "selected", "n_selected", "click_order", "click_rts",
     "rt", "time_elapsed"
 ];
 
@@ -991,7 +899,7 @@ function csvCell(v) {
 
 function buildDataString() {
     const rows = jsPsych.data.get()
-        .filter([{ task: "sample" }, { task: "sort" }])
+        .filter([{ task: "sample" }, { task: "select" }])
         .values()
         .map(d => Object.assign({}, d, { trial_type: d.phase }));
 
@@ -1075,14 +983,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const timeline = [preload, id_screen, createWarmupTrial(runList), intro_video];
 
-    // hand-coded practice: no labels, keeps the full first-trial sort framing
+    // hand-coded practice: no labels
     const practice = Object.assign({}, PRAC_TRIAL, { run_order: 0, matched: null, b_side: "left" });
     timeline.push(createSampleTrial(practice));
-    timeline.push(createSortTrial(practice, true, false));
+    timeline.push(createSelectTrial(practice, false));
 
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
-        timeline.push(createSortTrial(t, i === 0, i === runList.length - 1));
+        timeline.push(createSelectTrial(t, i === runList.length - 1));
         // Zib's box is two-thirds full — a break, not an end
         if (i === HALFWAY_AFTER - 1 && i < runList.length - 1) {
             timeline.push(createVideoTrial(HALFWAY_VIDEO, "halfway_video"));
