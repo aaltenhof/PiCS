@@ -14,7 +14,7 @@ const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 // "Can you pick all the sibus?" — always the target's (matched) label
 const SELECT_AUDIO   = label => `${LABEL_AUDIO}${label}/select_${label}.wav`;
 const SELECT_END     = [1, 2, 3].map(n => `audio/sort/end/to_sample${n}.wav`);
-const SELECT_HOLD_MS = 2500;   // how long the filled box sits before moving on
+const SELECT_HOLD_MS = 2500;   // last trial only: how long the filled box sits before the exit video
 
 const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
@@ -23,15 +23,15 @@ const PRAC_SEL_DIR  = PRACTICE_DIR + "selection/";
 const PRAC_SEL_INST = PRAC_SEL_DIR + "instructions.wav";
 const PRAC_SELECT   = set => `${PRAC_SEL_DIR}select_${set}.wav`;
 const PRAC_STIM     = "selected_stim/practice/";
-const PRAC_TRIAL    = {
-    trial_id: "practice",
-    trial_type: "practice",
-    stim_type: "practice",
-    prac_set: "dogs",
-    a_stim: "corgi.png",
-    b_stim: "pom.png",
-    x_stim: "golden.png"
-};
+
+// dogs comes first with the full sample-then-select framing (no labels);
+// birds and cats follow in shuffled order, selection only
+const PRAC_SETS = [
+    { prac_set: "dogs",  stims: ["corgi.png", "pom.png", "golden.png"], targets: ["corgi.png", "pom.png", "golden.png"],
+      sample: true, a_stim: "corgi.png", b_stim: "pom.png", x_stim: "golden.png" },
+    { prac_set: "birds", stims: ["bird1.png", "bird2.png", "lizard.png"], targets: ["bird1.png", "bird2.png"] },
+    { prac_set: "cats",  stims: ["cat.png", "cow.png", "fish.png"],       targets: ["cat.png"] }
+];
 
 const BOX_IMG       = "selected_stim/box_open.png";
 
@@ -154,7 +154,7 @@ function balancedFlags(n, maxRun) {
 
 
 function buildRunList(bank) {
-    const practice = bank.filter(t => t.trial_type === "practice");
+    // practice is defined in PRAC_SETS; any practice rows in trials.csv are ignored
     let experimental = bank.filter(t => t.trial_type === "experimental");
 
     if (SHUFFLE_TRIALS) {
@@ -167,14 +167,11 @@ function buildRunList(bank) {
         ? balancedFlags(experimental.length, MAX_MATCHED_RUN)
         : experimental.map(() => true);
 
-    let expIdx = 0;
-    return [...practice, ...experimental].map((t, i) => {
-        const matched = t.trial_type === "practice"
-            ? (t.force_matched !== undefined ? t.force_matched : true)
-            : flags[expIdx++];
+    return experimental.map((t, i) => {
+        const matched = flags[i];
 
         return Object.assign({}, t, {
-            run_order: i + 1,
+            run_order: PRAC_SETS.length + i + 1,
             matched: matched,
             label: matched ? t.matched_label : t.unmatched_label,
             label_audio: matched ? t.matched_audio : t.unmatched_audio,
@@ -364,8 +361,9 @@ function pause(ms) {
 
 // single source of truth: both the jsPsychPreload node and warmAudio use these
 function audioManifest(runList) {
-    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE,
-                   PRAC_SEL_INST, PRAC_SELECT(PRAC_TRIAL.prac_set)].concat(SELECT_END);
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_SEL_INST]
+        .concat(PRAC_SETS.map(p => PRAC_SELECT(p.prac_set)))
+        .concat(SELECT_END);
     const perTrial = runList.flatMap(t => [
         labelSrc(t.matched_label,   t.a_audio),
         labelSrc(t.matched_label,   t.matched_audio),
@@ -378,8 +376,8 @@ function audioManifest(runList) {
 }
 
 function imageManifest(runList) {
-    const prac = [PRAC_TRIAL.a_stim, PRAC_TRIAL.b_stim, PRAC_TRIAL.x_stim]
-        .map(f => stimSrc(PRAC_TRIAL, f));
+    const prac = PRAC_SETS.flatMap(p =>
+        p.stims.map(f => stimSrc({ trial_type: "practice", prac_set: p.prac_set }, f)));
     const exp = runList.flatMap(t => [t.a_stim, t.b_stim, t.x_stim].map(f => stimSrc(t, f)));
     return [...new Set([BOX_IMG].concat(prac).concat(exp).filter(Boolean))];
 }
@@ -595,6 +593,7 @@ function trialData(t, task) {
         phase: t.trial_type,          // "practice" | "experimental"
         is_practice: t.trial_type === "practice",
         stim_type: t.stim_type,
+        prac_set: t.prac_set,
         triad_dir: triadDir(t),
         a_stim: t.a_stim, b_stim: t.b_stim, x_stim: t.x_stim,
         matched: t.matched,
@@ -757,12 +756,17 @@ const SELECT_CSS = `
     display: flex; justify-content: center; align-items: center; gap: 5vw;
   }
   .select-stage .sel-item {
-    border: 6px solid transparent; border-radius: 22px; padding: 10px;
+    border-radius: 20px; padding: 14px;
+    background: rgba(124, 92, 255, 0.06);
+    box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.30);
     touch-action: manipulation; -webkit-tap-highlight-color: transparent;
-    transition: border-color .15s, opacity .4s, filter .4s;
+    transition: box-shadow .15s, background .15s, opacity .4s, filter .4s;
   }
-  .select-stage .sel-item.picked   { border-color: var(--go, #3aa76d); }
-  .select-stage .sel-item.unpicked { opacity: .35; filter: grayscale(1); }
+  .select-stage .sel-item.picked {
+    background: rgba(124, 92, 255, 0.16);
+    box-shadow: 0 0 0 6px var(--pick, #7c5cff), 0 0 34px rgba(124, 92, 255, 0.35);
+  }
+  .select-stage .sel-item.unpicked { opacity: .35; filter: grayscale(1); box-shadow: none; }
 
   .select-stage .sel-box {
     position: absolute; left: 3vw; bottom: 3vh;
@@ -802,17 +806,29 @@ function injectSelectCss() {
     document.head.appendChild(el);
 }
 
+const POSITIONS = ["left", "middle", "right"];
+
+// A/B/X roles wherever a trial has them (experimental, and the dog practice);
+// practice also carries which objects are targets
+function selectObjects(t) {
+    if (t.trial_type === "practice") {
+        const roleOf = f => f === t.a_stim ? "A" : f === t.b_stim ? "B" : f === t.x_stim ? "X" : "";
+        return t.stims.map(f => ({ role: roleOf(f), stim: f, target: t.targets.includes(f) }));
+    }
+    return [["A", t.a_stim], ["B", t.b_stim], ["X", t.x_stim]]
+        .map(([role, stim]) => ({ role, stim }));
+}
+
 function createSelectTrial(t, isLast, withInstructions = false) {
     // row positions are decided fresh each trial, independent of the sample
-    const rowOrder   = shuffle(["A", "B", "X"]);
-    const stimOf     = { A: t.a_stim, B: t.b_stim, X: t.x_stim };
+    const objs       = shuffle(selectObjects(t));
     const isPractice = t.trial_type === "practice";
     const prompt     = isPractice ? PRAC_SELECT(t.prac_set) : SELECT_AUDIO(t.matched_label);
     // the last trial hands off to the exit video
     const endAudio   = isLast ? null : SELECT_END[Math.floor(Math.random() * SELECT_END.length)];
 
-    const items = rowOrder.map(k =>
-        `<div class="sort-item sel-item" id="item-${k}">${stimImg(t, stimOf[k])}</div>`).join("");
+    const items = objs.map((o, i) =>
+        `<div class="sort-item sel-item" id="item-${i}">${stimImg(t, o.stim)}</div>`).join("");
 
     return {
         type: jsPsychHtmlButtonResponse,
@@ -831,9 +847,19 @@ function createSelectTrial(t, isLast, withInstructions = false) {
         on_load: async function () {
             const itemRow = document.getElementById("item-row");
             const done    = document.getElementById("done-btn");
-            const picks   = [];   // in tap order
+            const itemEl  = i => document.getElementById("item-" + i);
+            const picks   = [];   // object indices, in tap order
             const pickRts = [];
             let open = false;
+
+            // the prompt word covers A, plus the sampled object on matched trials
+            const sampleRow = jsPsych.data.get()
+                .filter({ task: "sample", run_order: t.run_order }).values()[0] || {};
+            objs.forEach(o => {
+                o.labeled = isPractice
+                    ? o.target
+                    : (o.role === "A" || (t.matched === true && o.role === sampleRow.sampled));
+            });
 
             // objects are on screen but locked until the prompt finishes
             await pause(400);
@@ -849,42 +875,62 @@ function createSelectTrial(t, isLast, withInstructions = false) {
             done.disabled = false;
 
             // one tap selects and locks; there is no way to unselect
-            rowOrder.forEach(k => {
-                const el = document.getElementById("item-" + k);
-                el.addEventListener("click", () => {
+            objs.forEach((o, i) => {
+                itemEl(i).addEventListener("click", () => {
                     if (!open) return;
-                    picks.push(k);
+                    picks.push(i);
                     pickRts.push(Math.round(performance.now() - t0));
-                    el.classList.add("picked");
+                    itemEl(i).classList.add("picked");
                 }, { once: true });
             });
 
             await new Promise(resolve => done.addEventListener("click", resolve, { once: true }));
-            const rt = Math.round(performance.now() - t0);
+            const doneRt = Math.round(performance.now() - t0);
             open = false;
             done.disabled = true;
             done.classList.add("done-hidden");
             itemRow.classList.remove("active");
 
-            rowOrder.filter(k => !picks.includes(k))
-                .forEach(k => document.getElementById("item-" + k).classList.add("unpicked"));
+            objs.forEach((o, i) => { if (!picks.includes(i)) itemEl(i).classList.add("unpicked"); });
             await pause(400);
 
-            await flyToBox(picks.map(k => document.getElementById("item-" + k)),
-                           document.getElementById("box-items-0"));
+            await flyToBox(picks.map(itemEl), document.getElementById("box-items-0"));
 
-            await pause(SELECT_HOLD_MS);
+            // straight into the hand-off clip; only the last trial, which has
+            // none, holds on the filled box before the exit video
             if (endAudio) await playAudio(endAudio);
+            else await pause(SELECT_HOLD_MS);
+
+            const objects = objs.map((o, i) => {
+                const rank = picks.indexOf(i);
+                return {
+                    role: o.role,
+                    stim: o.stim,
+                    position: POSITIONS[i],
+                    labeled: o.labeled ? 1 : 0,
+                    selected: rank >= 0 ? 1 : 0,
+                    click_rank: rank >= 0 ? rank + 1 : null,
+                    click_rt: rank >= 0 ? pickRts[rank] : null
+                };
+            });
+            const nExtra     = objects.filter(o => o.selected && !o.labeled).length;
+            const allLabeled = objects.every(o => o.selected || !o.labeled);
+            // practice has a right answer, so extras fail it; test trials only
+            // require every labeled object to be picked
+            const passed = isPractice ? (allLabeled && nExtra === 0) : allLabeled;
 
             jsPsych.finishTrial({
-                rt: rt,
-                row_order: rowOrder.join(""),
-                prompt_audio: prompt,
-                selected: ["A", "B", "X"].filter(k => picks.includes(k)).join(""),
+                done_rt: doneRt,
                 n_selected: picks.length,
-                click_order: picks.join(""),
-                click_rts: pickRts.join(" "),
-                end_audio: endAudio
+                n_extra: nExtra,
+                check_passed: passed ? 1 : 0,
+                sampled: sampleRow.sampled,
+                sampled_side: sampleRow.sampled_side,
+                heard_label: sampleRow.heard_label,
+                sample_rt: sampleRow.rt,
+                prompt_audio: prompt,
+                end_audio: endAudio,
+                objects: objects
             });
         }
     };
@@ -940,35 +986,34 @@ function createVideoTrial(src, task) {
 
 const exit_video = createVideoTrial(EXIT_VIDEO, "exit_video");
 
-/* Explicit output columns. jsPsych's own bookkeeping (trial_index,
-   plugin_version, time_elapsed, preload results...) is dropped, and the
-   ordering mirrors trials.csv minus the audio filename columns. */
+/* One row per object per trial: three rows share a trial_num, with the
+   trial-level fields (sample, label, check) repeated on each. jsPsych's own
+   bookkeeping is dropped. */
 const OUT_COLUMNS = [
     "participant_id", "participant_age", "study_id", "session_date", "session_time",
-    "run_order", "con_trial_num", "task",
-    "trial_id", "trial_type", "stim_type",
-    "a_stim", "b_stim", "x_stim",
+    "trial_num", "trial_type", "trial_id", "stim_type", "prac_set",
     "matched", "matched_label", "unmatched_label", "heard_label",
-    "b_side", "sampled", "sampled_stim", "sampled_side", "unsampled",
-    "row_order", "selected", "n_selected", "click_order", "click_rts",
-    "rt", "time_elapsed"
+    "b_side", "sampled", "sampled_side", "sample_rt",
+    "role", "stim", "position", "labeled", "selected", "click_rank", "click_rt",
+    "n_selected", "n_extra", "check_passed", "done_rt", "time_elapsed"
 ];
 
 function csvCell(v) {
     if (v === null || v === undefined) return "";
+    if (v === true)  return "1";
+    if (v === false) return "0";
     const str = String(v);
     return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
 function buildDataString() {
     const rows = jsPsych.data.get()
-        .filter([{ task: "sample" }, { task: "select" }])
+        .filter({ task: "select" })
         .values()
-        .map(d => Object.assign({}, d, { trial_type: d.phase }));
-
-    // numbered over the rows actually emitted, so practice starts at 1 rather
-    // than going negative off the back of run_order 0
-    rows.forEach((d, i) => { d.con_trial_num = i + 1; });
+        .flatMap(d => (d.objects || []).map(o => Object.assign({}, d, o, {
+            trial_num: d.run_order,
+            trial_type: d.phase
+        })));
 
     const lines = rows.map(d => OUT_COLUMNS.map(c => csvCell(d[c])).join(","));
     return [OUT_COLUMNS.join(",")].concat(lines).join("\n");
@@ -1048,10 +1093,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const timeline = [preload, id_screen, createWarmupTrial(runList), intro_video];
 
-    // hand-coded practice: no labels
-    const practice = Object.assign({}, PRAC_TRIAL, { run_order: 0, matched: null, b_side: "left" });
-    timeline.push(createSampleTrial(practice));
-    timeline.push(createSelectTrial(practice, false, true));
+    // the selection instructions play before the first practice selection
+    const pracOrder = PRAC_SETS.filter(p => p.sample)
+        .concat(shuffle(PRAC_SETS.filter(p => !p.sample)));
+    pracOrder.forEach((p, i) => {
+        const t = Object.assign({
+            trial_id: `practice_${p.prac_set}`,
+            trial_type: "practice",
+            stim_type: "practice",
+            run_order: i + 1,
+            b_side: "left"
+        }, p);
+        if (t.sample) timeline.push(createSampleTrial(t));
+        timeline.push(createSelectTrial(t, false, i === 0));
+    });
 
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
