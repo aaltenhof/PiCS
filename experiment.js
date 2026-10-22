@@ -20,6 +20,7 @@ const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
 const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
 const PRAC_AGAIN    = PRACTICE_DIR + "practice_again.wav";
+const PRAC_AGAIN2   = PRACTICE_DIR + "practice_again2.wav";
 const PRAC_DONE     = PRACTICE_DIR + "done_practicing.wav";
 const PRAC_SEL_DIR  = PRACTICE_DIR + "selection/";
 const PRAC_SEL_INST = PRAC_SEL_DIR + "instructions.wav";
@@ -363,7 +364,7 @@ function pause(ms) {
 
 // single source of truth: both the jsPsychPreload node and warmAudio use these
 function audioManifest(runList) {
-    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_AGAIN, PRAC_DONE, PRAC_SEL_INST]
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_AGAIN, PRAC_AGAIN2, PRAC_DONE, PRAC_SEL_INST]
         .concat(PRAC_SETS.map(p => PRAC_SELECT(p.prac_set)))
         .concat(SELECT_END);
     const perTrial = runList.flatMap(t => [
@@ -1110,9 +1111,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             b_side: "left"
         }, p);
         if (t.sample) timeline.push(createSampleTrial(t));
-        // "let's practice again" between practice trials, "done practicing"
-        // after the last one
-        const end = i < pracOrder.length - 1 ? PRAC_AGAIN : PRAC_DONE;
+        const end = [PRAC_AGAIN, PRAC_AGAIN2, PRAC_DONE][i];
         timeline.push(createSelectTrial(t, end, i === 0));
     });
 
