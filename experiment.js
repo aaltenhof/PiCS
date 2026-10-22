@@ -19,6 +19,8 @@ const SELECT_HOLD_MS = 2500;   // last trial only: how long the filled box sits 
 const PRACTICE_DIR  = "audio/practice/";
 const PRAC_INTRO    = PRACTICE_DIR + "practice_intro.wav";
 const PRAC_SAMPLE   = PRACTICE_DIR + "practice_sample.wav";
+const PRAC_AGAIN    = PRACTICE_DIR + "practice_again.wav";
+const PRAC_DONE     = PRACTICE_DIR + "done_practicing.wav";
 const PRAC_SEL_DIR  = PRACTICE_DIR + "selection/";
 const PRAC_SEL_INST = PRAC_SEL_DIR + "instructions.wav";
 const PRAC_SELECT   = set => `${PRAC_SEL_DIR}select_${set}.wav`;
@@ -361,7 +363,7 @@ function pause(ms) {
 
 // single source of truth: both the jsPsychPreload node and warmAudio use these
 function audioManifest(runList) {
-    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_SEL_INST]
+    const fixed = [CUE_PICK_ONE, CUE_TO_SORT, PRAC_INTRO, PRAC_SAMPLE, PRAC_AGAIN, PRAC_DONE, PRAC_SEL_INST]
         .concat(PRAC_SETS.map(p => PRAC_SELECT(p.prac_set)))
         .concat(SELECT_END);
     const perTrial = runList.flatMap(t => [
@@ -819,13 +821,16 @@ function selectObjects(t) {
         .map(([role, stim]) => ({ role, stim }));
 }
 
-function createSelectTrial(t, isLast, withInstructions = false) {
+function randomEnd() {
+    return SELECT_END[Math.floor(Math.random() * SELECT_END.length)];
+}
+
+// endAudio: the clip after the box fills; null holds on the box instead
+function createSelectTrial(t, endAudio, withInstructions = false) {
     // row positions are decided fresh each trial, independent of the sample
     const objs       = shuffle(selectObjects(t));
     const isPractice = t.trial_type === "practice";
     const prompt     = isPractice ? PRAC_SELECT(t.prac_set) : SELECT_AUDIO(t.matched_label);
-    // the last trial hands off to the exit video
-    const endAudio   = isLast ? null : SELECT_END[Math.floor(Math.random() * SELECT_END.length)];
 
     const items = objs.map((o, i) =>
         `<div class="sort-item sel-item" id="item-${i}">${stimImg(t, o.stim)}</div>`).join("");
@@ -896,8 +901,8 @@ function createSelectTrial(t, isLast, withInstructions = false) {
 
             await flyToBox(picks.map(itemEl), document.getElementById("box-items-0"));
 
-            // straight into the hand-off clip; only the last trial, which has
-            // none, holds on the filled box before the exit video
+            // straight into the hand-off clip; the last trial has none and
+            // holds on the filled box before the exit video
             if (endAudio) await playAudio(endAudio);
             else await pause(SELECT_HOLD_MS);
 
@@ -1105,12 +1110,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             b_side: "left"
         }, p);
         if (t.sample) timeline.push(createSampleTrial(t));
-        timeline.push(createSelectTrial(t, false, i === 0));
+        // "let's practice again" between practice trials, "done practicing"
+        // after the last one
+        const end = i < pracOrder.length - 1 ? PRAC_AGAIN : PRAC_DONE;
+        timeline.push(createSelectTrial(t, end, i === 0));
     });
 
     runList.forEach((t, i) => {
         timeline.push(createSampleTrial(t));
-        timeline.push(createSelectTrial(t, i === runList.length - 1));
+        timeline.push(createSelectTrial(t, i === runList.length - 1 ? null : randomEnd()));
         // Zib's box is two-thirds full — a break, not an end
         if (i === HALFWAY_AFTER - 1 && i < runList.length - 1) {
             timeline.push(createVideoTrial(HALFWAY_VIDEO, "halfway_video"));
