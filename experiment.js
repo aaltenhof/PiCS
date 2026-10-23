@@ -12,7 +12,7 @@ const CUE_PICK_ONE  = SUPPORT_AUDIO + "pick_one.wav";
 const CUE_TO_SORT   = SUPPORT_AUDIO + "to_sort.wav";
 
 // "Can you pick all the sibus?" — always the target's (matched) label
-const SELECT_AUDIO   = label => `${LABEL_AUDIO}${label}/select_${label}.wav`;
+const SELECT_AUDIO   = label => `${LABEL_AUDIO}${label}/select_think_${label}.wav`;
 const SELECT_END     = [1, 2, 3].map(n => `audio/sort/end/to_sample${n}.wav`);
 const SELECT_HOLD_MS = 2500;   // last trial only: how long the filled box sits before the exit video
 
@@ -28,12 +28,13 @@ const PRAC_SELECT   = set => `${PRAC_SEL_DIR}select_${set}.wav`;
 const PRAC_STIM     = "selected_stim/practice/";
 
 // dogs comes first with the full sample-then-select framing (no labels);
-// birds and cats follow in shuffled order, selection only
+// birds, cats, and pigs follow in shuffled order, selection only
 const PRAC_SETS = [
     { prac_set: "dogs",  stims: ["corgi.png", "pom.png", "golden.png"], targets: ["corgi.png", "pom.png", "golden.png"],
       sample: true, a_stim: "corgi.png", b_stim: "pom.png", x_stim: "golden.png" },
     { prac_set: "birds", stims: ["bird1.png", "bird2.png", "lizard.png"], targets: ["bird1.png", "bird2.png"] },
-    { prac_set: "cats",  stims: ["cat.png", "cow.png", "fish.png"],       targets: ["cat.png"] }
+    { prac_set: "cats",  stims: ["cat.png", "cow.png", "fish.png"],       targets: ["cat.png"] },
+    { prac_set: "pigs",  stims: ["pig.png", "bunny.png", "horse.png"],    targets: ["pig.png"] }
 ];
 
 const BOX_IMG       = "selected_stim/box_open.png";
@@ -1111,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             b_side: "left"
         }, p);
         if (t.sample) timeline.push(createSampleTrial(t));
-        const end = [PRAC_AGAIN, PRAC_AGAIN2, PRAC_DONE][i];
+        const end = [PRAC_AGAIN, PRAC_AGAIN, PRAC_AGAIN2, PRAC_DONE][i];
         timeline.push(createSelectTrial(t, end, i === 0));
     });
 
