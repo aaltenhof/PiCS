@@ -1109,7 +1109,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             trial_type: "practice",
             stim_type: "practice",
             run_order: i + 1,
-            b_side: "left"
+            // only the sampled practice has a B to place
+            b_side: p.sample ? "left" : null
         }, p);
         if (t.sample) timeline.push(createSampleTrial(t));
         const end = [PRAC_AGAIN, PRAC_AGAIN, PRAC_AGAIN2, PRAC_DONE][i];
